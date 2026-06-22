@@ -638,6 +638,24 @@ pub(crate) fn run_update_focus_pass(root: &mut RenderRoot) {
         root.global_state.focus_fallback = None;
     }
 
+    // Clear stale focused_widget if the previously focused widget was destroyed.
+    if let Some(id) = root.global_state.focused_widget
+        && !root.has_widget(id)
+    {
+        root.global_state.focused_widget = None;
+    }
+
+    // When focus is lost with no pending recipient, auto-restore it
+    // to the focus fallback (if set).  This keeps keyboard events
+    // flowing to a sensible widget after editing finishes or the
+    // previously focused widget is torn down.
+    if root.global_state.focus_fallback.is_some()
+        && root.global_state.next_focused_widget.is_none()
+        && root.global_state.focused_widget.is_none()
+    {
+        root.global_state.next_focused_widget = root.global_state.focus_fallback;
+    }
+
     let prev_focused = root.global_state.focused_widget;
     let was_ime_active = root.global_state.is_ime_active;
 

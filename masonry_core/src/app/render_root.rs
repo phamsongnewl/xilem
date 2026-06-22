@@ -958,6 +958,11 @@ impl RenderRoot {
         self.global_state.focused_widget
     }
 
+    /// Returns the [`WidgetId`] of the [focus fallback](crate::doc::masonry_concepts#focus-fallback).
+    pub fn focus_fallback(&self) -> Option<WidgetId> {
+        self.global_state.focus_fallback
+    }
+
     /// Returns the [`WidgetId`] of the widget which [captures pointer events](crate::doc::masonry_concepts#pointer-capture).
     pub fn pointer_capture_target(&self) -> Option<WidgetId> {
         self.global_state.pointer_capture_target

@@ -574,6 +574,28 @@ impl_context_method!(ActionCtx<'_>, EventCtx<'_>, {
     }
 });
 
+// Focus-fallback methods shared by update, event, and action contexts.
+impl_context_method!(ActionCtx<'_>, EventCtx<'_>, UpdateCtx<'_>, {
+    /// Registers this widget as the focus fallback.
+    ///
+    /// When no widget has focus and no focus transfer is pending, the system
+    /// will auto-assign focus to the registered fallback.
+    pub fn set_self_as_focus_fallback(&mut self) {
+        let id = self.widget_id();
+        self.global_state.focus_fallback = Some(id);
+    }
+
+    /// If no focus transfer is pending, requests focus for this widget.
+    ///
+    /// Used when this widget loses focus to reclaim it when no other widget
+    /// takes over.
+    pub fn reclaim_focus_if_none(&mut self) {
+        if self.global_state.next_focused_widget.is_none() {
+            self.global_state.next_focused_widget = Some(self.widget_id());
+        }
+    }
+});
+
 // --- MARK: ACCESSIBILITY
 impl AccessCtx<'_> {
     // TODO - We need access to the TreeUpdate to create sub-nodes for text runs,
