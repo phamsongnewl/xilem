@@ -20,10 +20,10 @@ use tree_arena::{ArenaMut, ArenaMutList, ArenaRefList};
 
 use crate::app::{MutateCallback, RenderRootSignal, RenderRootState};
 use crate::core::{
-    AllowRawMut, BrushIndex, ClassSet, ErasedAction, FromDynWidget, LayerType, NewWidget,
-    PaintLayerMode, PropertiesMut, PropertiesRef, PropertyArena, PropertyCache, PropertyStackId,
-    ResizeDirection, Widget, WidgetArenaNode, WidgetId, WidgetMut, WidgetPod, WidgetRef,
-    WidgetState,
+    AllowRawMut, BrushIndex, ClassSet, ClipboardFormat, ErasedAction, FromDynWidget, LayerType,
+    NewWidget, PaintLayerMode, PropertiesMut, PropertiesRef, PropertyArena, PropertyCache,
+    PropertyStackId, ResizeDirection, Widget, WidgetArenaNode, WidgetId, WidgetMut, WidgetPod,
+    WidgetRef, WidgetState,
 };
 use crate::kurbo::{Affine, Axis, Insets, Point, Rect, Size, Vec2};
 use crate::layout::{LayoutSize, LenDef, Length, SizeDef};
@@ -1920,6 +1920,17 @@ impl_context_method!(
             trace!("set_clipboard");
             self.global_state
                 .emit_signal(RenderRootSignal::ClipboardStore(contents));
+        }
+
+        /// Store multiple clipboard representations in one atomic operation.
+        /// Backends map each [`ClipboardFormat`] to a native format.
+        ///
+        /// Falls back to `set_clipboard(String)` semantics for backends that only
+        /// support a single String (they pick the `text/plain` format).
+        pub fn set_clipboard_multi(&mut self, formats: Vec<ClipboardFormat>) {
+            trace!("set_clipboard_multi");
+            self.global_state
+                .emit_signal(RenderRootSignal::ClipboardStoreMulti(formats));
         }
 
         /// Starts a window drag.

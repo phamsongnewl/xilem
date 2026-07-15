@@ -89,9 +89,12 @@
 use vello as _;
 
 mod app_driver;
+mod clipboard_multi;
 mod convert_winit_event;
 mod event_loop_runner;
 mod vello_util;
+
+pub use clipboard_multi::WindowsMultiClipboard;
 
 pub use winit;
 

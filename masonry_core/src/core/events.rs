@@ -9,6 +9,20 @@ use ui_events::keyboard::{Code, Key, KeyState, KeyboardEvent};
 use crate::dpi::PhysicalSize;
 use crate::util::Duration;
 
+/// One clipboard representation, platform-agnostic.
+///
+/// Used by `RenderRootSignal::ClipboardStoreMulti` and
+/// `EventCtx::set_clipboard_multi`. Each backend maps `mime` to a native
+/// format (Windows: `CF_UNICODETEXT` / registered format; macOS: UTI;
+/// Linux: MIME offer).
+#[derive(Clone, Debug)]
+pub struct ClipboardFormat {
+    /// MIME type, e.g. `text/plain`, `text/html`, `application/x-suess-rich+json`.
+    pub mime: String,
+    /// Payload bytes (UTF-8 for text formats, raw otherwise).
+    pub data: Vec<u8>,
+}
+
 // --- MARK: TYPES
 
 /// A global event.
@@ -35,9 +49,17 @@ pub enum TextEvent {
     Ime(Ime),
     /// The window took or lost focus.
     WindowFocusChange(bool),
-    // TODO - Handle rich text copy-pasting
-    /// The user pasted content in.
+    /// The user pasted content in (single-text path; code mode / plain fallback).
     ClipboardPaste(String),
+    /// The user pasted content in (multi-format path; rich text).
+    /// `text` is the `text/plain` representation; `custom` is the
+    /// `application/x-suess-rich+json` bytes if the source app wrote it.
+    ClipboardPasteMulti {
+        /// Plain text representation of pasted content.
+        text: String,
+        /// Optional custom format bytes, e.g. `application/x-suess-rich+json`.
+        custom: Option<Vec<u8>>,
+    },
 }
 
 /// An accessibility event.
@@ -222,6 +244,7 @@ impl TextEvent {
             Self::Ime(Ime::Preedit(_, _)) => "Ime::Preedit(\"...\")",
             Self::WindowFocusChange(_) => "WindowFocusChange",
             Self::ClipboardPaste(_) => "ClipboardPaste",
+            Self::ClipboardPasteMulti { .. } => "ClipboardPasteMulti",
         }
     }
 }

@@ -37,6 +37,7 @@ use crate::app::{
 };
 use crate::app_driver::WindowId;
 use crate::vello_util::{RenderContext, RenderSurface};
+use crate::WindowsMultiClipboard;
 
 /// The custom event type that we inject into winit's [`EventLoop`](winit::event_loop::EventLoop).
 ///
@@ -225,6 +226,7 @@ pub struct MasonryState<'a> {
     resized_window: Option<HandleId>,
 
     clipboard_cx: Box<dyn ClipboardProvider>,
+    clipboard_multi: WindowsMultiClipboard,
 
     // Is `Some` if the most recently displayed frame was an animation frame.
     last_anim: Option<Instant>,
@@ -428,6 +430,7 @@ impl MasonryState<'_> {
             resized_window: None,
 
             clipboard_cx,
+            clipboard_multi: WindowsMultiClipboard::new(),
 
             signal_sender,
             default_properties: Arc::new(default_properties),
@@ -861,11 +864,11 @@ impl MasonryState<'_> {
                         && action_mod
                         && k.state == KeyState::Down
                     {
+                        let text = self.clipboard_cx.get_contents().unwrap_or_default();
+                        let custom = self.clipboard_multi.get_rich();
                         window
                             .render_root
-                            .handle_text_event(TextEvent::ClipboardPaste(
-                                self.clipboard_cx.get_contents().unwrap(),
-                            ));
+                            .handle_text_event(TextEvent::ClipboardPasteMulti { text, custom });
                     } else {
                         window.render_root.handle_text_event(TextEvent::Keyboard(k));
                     }
@@ -1065,6 +1068,9 @@ impl MasonryState<'_> {
                 }
                 RenderRootSignal::ClipboardStore(text) => {
                     self.clipboard_cx.set_contents(text).unwrap();
+                }
+                RenderRootSignal::ClipboardStoreMulti(formats) => {
+                    let _ = self.clipboard_multi.set(&formats);
                 }
                 RenderRootSignal::RequestRedraw => {
                     need_redraw.insert(*handle_id);

@@ -792,7 +792,8 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                 }
             }
 
-            TextEvent::ClipboardPaste(text) => {
+            TextEvent::ClipboardPasteMulti { text, custom: _ }
+            | TextEvent::ClipboardPaste(text) => {
                 if EDITABLE {
                     let (fctx, lctx) = ctx.text_contexts();
                     self.editor
