@@ -421,12 +421,23 @@ fn f11_toggles_picker_even_when_focused_widget_swallows_keys() {
     };
 
     // F11 while the swallowing widget has focus: the picker still turns on,
-    // so the next click is consumed instead of reaching the button.
+    // so the next click is consumed instead of reaching the button, and the
+    // cursor switches to a crosshair (visible mode feedback).
     f11_down(&mut harness);
+    assert_eq!(
+        harness.cursor_icon(),
+        masonry_core::core::CursorIcon::Crosshair,
+        "crosshair cursor while picking"
+    );
     harness.mouse_click_on(button_id, None);
     assert!(
         harness.pop_action::<ButtonPress>().is_none(),
         "picker consumed the click after F11 with a key-swallowing widget focused"
+    );
+    assert_eq!(
+        harness.cursor_icon(),
+        masonry_core::core::CursorIcon::Default,
+        "one-shot pick restores the default cursor"
     );
 
     // The picker is one-shot (upstream semantics): it turns itself off after

@@ -1073,7 +1073,11 @@ pub(crate) fn run_update_pointer_pass(root: &mut RenderRoot) {
         .pointer_capture_target
         .or(next_hovered_widget);
 
-    let new_icon = if let (Some(icon_source), Some(pos)) = (icon_source, pointer_pos) {
+    // Widget-picker mode overrides the hover cursor with a crosshair so the
+    // mode has visible feedback (e.g. after an F11 toggle while hovering).
+    let new_icon = if root.global_state.inspector_state.is_picking_widget {
+        CursorIcon::Crosshair
+    } else if let (Some(icon_source), Some(pos)) = (icon_source, pointer_pos) {
         let root_node = root.widget_arena.get_node(icon_source);
         let children = root_node.children;
         let widget = &*root_node.item.widget;

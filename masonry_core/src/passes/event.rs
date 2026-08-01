@@ -6,8 +6,8 @@ use tracing::{info_span, trace};
 use crate::app::{RenderRoot, RenderRootSignal};
 use crate::core::keyboard::{Key, KeyState, NamedKey};
 use crate::core::{
-    AccessEvent, EventCtx, Handled, Ime, InspectorEvent, PointerButtonEvent, PointerEvent,
-    PointerGestureEvent, PointerInfo, PointerScrollEvent, PointerType, PointerUpdate,
+    AccessEvent, CursorIcon, EventCtx, Handled, Ime, InspectorEvent, PointerButtonEvent,
+    PointerEvent, PointerGestureEvent, PointerInfo, PointerScrollEvent, PointerType, PointerUpdate,
     PropertiesMut, TextEvent, Widget, WidgetId,
 };
 use crate::dpi::{LogicalPosition, PhysicalPosition};
@@ -205,6 +205,10 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
         }
         root.global_state.inspector_state.is_picking_widget = false;
         root.global_state.inspector_state.hovered_widget = None;
+        // Picking is one-shot: the pick restores the default cursor (the
+        // picker mode ends with this click).
+        root.global_state.cursor_icon = CursorIcon::Default;
+        root.emit_signal(RenderRootSignal::SetCursor(CursorIcon::Default));
         root.root_state_mut().needs_paint = true;
         return Handled::Yes;
     }
@@ -334,6 +338,8 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
     // any widget that marks every key as handled) would otherwise swallow F11,
     // so the picker could never toggle while typing. Only a plain F11 press
     // (no modifiers) is intercepted; the key is not forwarded to widgets.
+    // The cursor switches to a crosshair while picking, so the toggle has
+    // visible feedback.
     if let TextEvent::Keyboard(key) = event
         && key.key == Key::Named(NamedKey::F11)
         && key.state == KeyState::Down
@@ -342,6 +348,12 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         root.global_state.inspector_state.is_picking_widget =
             !root.global_state.inspector_state.is_picking_widget;
         root.global_state.inspector_state.hovered_widget = None;
+        root.global_state.cursor_icon = if root.global_state.inspector_state.is_picking_widget {
+            CursorIcon::Crosshair
+        } else {
+            CursorIcon::Default
+        };
+        root.emit_signal(RenderRootSignal::SetCursor(root.global_state.cursor_icon));
         root.root_state_mut().needs_paint = true;
         return Handled::Yes;
     }

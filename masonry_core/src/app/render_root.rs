@@ -427,9 +427,18 @@ impl RenderRoot {
     }
 
     /// Enables/disables widget-picker mode (equivalent to the F11 toggle).
+    /// The cursor switches to a crosshair while picking, so the mode has
+    /// visible feedback.
     pub fn set_picking(&mut self, enabled: bool) {
         self.global_state.inspector_state.is_picking_widget = enabled;
         self.global_state.inspector_state.hovered_widget = None;
+        self.global_state.cursor_icon = if enabled {
+            CursorIcon::Crosshair
+        } else {
+            CursorIcon::Default
+        };
+        self.global_state
+            .emit_signal(RenderRootSignal::SetCursor(self.global_state.cursor_icon));
         self.root_state_mut().needs_paint = true;
     }
 
