@@ -7,9 +7,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use masonry_testing::TestHarness;
+use masonry_testing::{ModularWidget, TestHarness};
 
-use crate::core::{InspectorEvent, NewWidget, WidgetId};
+use crate::core::keyboard::{Code, Key, KeyState, NamedKey};
+use crate::core::{InspectorEvent, KeyboardEvent, Modifiers, NewWidget, TextEvent, WidgetId};
+use crate::layout::AsUnit;
 use crate::theme::test_property_set;
 use crate::widgets::{Button, ButtonPress, Flex, Label, TextInput};
 
@@ -379,4 +381,77 @@ fn listener_receives_focus_change() {
     harness.focus_on(Some(button_id));
     let value = got.get().flatten();
     assert_eq!(value, Some(button_id.to_raw()), "focus change observed");
+}
+
+#[test]
+fn f11_toggles_picker_even_when_focused_widget_swallows_keys() {
+    // A focused widget that marks every text event handled (like a rich-text
+    // editor) must not be able to swallow the picker toggle: F11 is
+    // intercepted before the widget pass.
+    let swallow = ModularWidget::new(())
+        .text_event_fn(|_, ctx, _, _| {
+            ctx.set_handled();
+        })
+        .measure_fn(|_, _, _, _, _, _| 20.px());
+    let button = Button::new(NewWidget::new(Label::new("Hi")));
+    let flex = Flex::row()
+        .with_fixed(NewWidget::new(swallow))
+        .with_fixed(NewWidget::new(button));
+    let mut harness =
+        TestHarness::create_with_size(test_property_set(), NewWidget::new(flex), (400, 300));
+    harness.render();
+    // Second child is the button; the first is the key-swallowing widget.
+    let button_id = harness
+        .get_widget_with_id(harness.root_id())
+        .children()
+        .get(1)
+        .unwrap()
+        .id();
+    harness.focus_on(Some(harness.root_id()));
+
+    let f11_down = |harness: &mut TestHarness<Flex>| {
+        let event = TextEvent::Keyboard(KeyboardEvent {
+            state: KeyState::Down,
+            key: Key::Named(NamedKey::F11),
+            code: Code::Unidentified,
+            modifiers: Modifiers::empty(),
+            ..Default::default()
+        });
+        harness.process_text_event(event);
+    };
+
+    // F11 while the swallowing widget has focus: the picker still turns on,
+    // so the next click is consumed instead of reaching the button.
+    f11_down(&mut harness);
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_none(),
+        "picker consumed the click after F11 with a key-swallowing widget focused"
+    );
+
+    // The picker is one-shot (upstream semantics): it turns itself off after
+    // a pick, so a plain click now reaches the button again.
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_some(),
+        "picker auto-disabled after one pick"
+    );
+
+    // F11 again: picker on again, click consumed.
+    f11_down(&mut harness);
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_none(),
+        "picker re-enabled by the second F11"
+    );
+
+    // And off again — after the one-shot reset the flag is false, so it
+    // takes two F11s to toggle back off: clicks reach the button.
+    f11_down(&mut harness);
+    f11_down(&mut harness);
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_some(),
+        "two F11s toggle the picker back off"
+    );
 }

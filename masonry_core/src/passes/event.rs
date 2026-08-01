@@ -329,6 +329,23 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         });
 
     let skip_if_disabled = !matches!(event, TextEvent::Ime(Ime::Disabled));
+
+    // Debug toggles take priority over the widget pass: a focused editor (or
+    // any widget that marks every key as handled) would otherwise swallow F11,
+    // so the picker could never toggle while typing. Only a plain F11 press
+    // (no modifiers) is intercepted; the key is not forwarded to widgets.
+    if let TextEvent::Keyboard(key) = event
+        && key.key == Key::Named(NamedKey::F11)
+        && key.state == KeyState::Down
+        && key.modifiers.is_empty()
+    {
+        root.global_state.inspector_state.is_picking_widget =
+            !root.global_state.inspector_state.is_picking_widget;
+        root.global_state.inspector_state.hovered_widget = None;
+        root.root_state_mut().needs_paint = true;
+        return Handled::Yes;
+    }
+
     let mut handled = run_event_pass(
         root,
         target,
@@ -350,17 +367,6 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
             let forward = !key.modifiers.shift();
             let next_focused_widget = find_next_focusable(root, forward);
             root.global_state.next_focused_widget = next_focused_widget;
-            handled = Handled::Yes;
-        }
-
-        if key.key == Key::Named(NamedKey::F11)
-            && key.state == KeyState::Down
-            && handled == Handled::No
-        {
-            root.global_state.inspector_state.is_picking_widget =
-                !root.global_state.inspector_state.is_picking_widget;
-            root.global_state.inspector_state.hovered_widget = None;
-            root.root_state_mut().needs_paint = true;
             handled = Handled::Yes;
         }
 
