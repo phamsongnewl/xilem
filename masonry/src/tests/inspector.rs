@@ -231,6 +231,46 @@ fn listener_receives_action_with_source() {
     );
 }
 
+#[test]
+fn set_picking_toggles_picker() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    // Count pointer observations: the listener must fire BEFORE the picker
+    // short-circuit, so all Move/Down/Up events are still observed.
+    let pointer_events: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let p2 = pointer_events.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Pointer { .. } = ev {
+                p2.set(p2.get() + 1);
+            }
+        })));
+
+    // Picking ON: the click selects a widget instead of propagating — the
+    // button never sees Down, so no ButtonPress action.
+    harness.render_root().set_picking(true);
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_none(),
+        "picker consumed the click: no button action"
+    );
+    assert_eq!(
+        pointer_events.get(),
+        3,
+        "listener fires for Move/Down/Up before the picker short-circuit"
+    );
+
+    // Picking OFF: normal dispatch resumes.
+    harness.render_root().set_picking(false);
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_some(),
+        "click reaches the button again after set_picking(false)"
+    );
+}
+
 // --- TextInput debug text ---
 
 #[test]

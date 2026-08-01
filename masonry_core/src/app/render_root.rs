@@ -426,6 +426,13 @@ impl RenderRoot {
         self.global_state.inspector_event_listener = listener;
     }
 
+    /// Enables/disables widget-picker mode (equivalent to the F11 toggle).
+    pub fn set_picking(&mut self, enabled: bool) {
+        self.global_state.inspector_state.is_picking_widget = enabled;
+        self.global_state.inspector_state.hovered_widget = None;
+        self.root_state_mut().needs_paint = true;
+    }
+
     /// Root-to-leaf path of the given widget (empty if the widget is not in the tree).
     pub(crate) fn widget_path(&self, id: Option<WidgetId>) -> Vec<WidgetId> {
         let Some(mut id) = id else {
