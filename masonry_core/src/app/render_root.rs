@@ -511,7 +511,9 @@ impl RenderRoot {
     /// Returns the widget ID of each layer, in stack order.
     ///
     /// Index 0 is the base layer; subsequent entries are overlay layers.
-    pub(crate) fn layer_root_ids(&self) -> Vec<WidgetId> {
+    /// Public so hosts (e.g. the inspector controller) can discover the id
+    /// of a layer they added (adding returns no id).
+    pub fn layer_root_ids(&self) -> Vec<WidgetId> {
         let node_ref = self
             .widget_arena
             .nodes

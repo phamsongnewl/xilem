@@ -271,6 +271,38 @@ fn set_picking_toggles_picker() {
     );
 }
 
+// --- Layer stack accessors (Task 17) ---
+
+#[test]
+fn layer_root_ids_tracks_panel_layer_add_and_remove() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let ids_before = harness.render_root().layer_root_ids();
+    assert_eq!(ids_before.len(), 1, "fresh root: only the base layer");
+
+    // add_layer returns (), so the inspector discovers the overlay id via
+    // the pre/post-add diff of layer_root_ids.
+    harness.render_root().add_layer(
+        NewWidget::new(Label::new("inspector panel")),
+        crate::kurbo::Point::new(20.0, 20.0),
+    );
+    let ids_after = harness.render_root().layer_root_ids();
+    assert_eq!(ids_after.len(), 2, "add_layer appends one overlay layer");
+    let panel = ids_after
+        .iter()
+        .find(|id| !ids_before.contains(id))
+        .copied();
+    assert_eq!(panel, Some(ids_after[1]), "new layer is the added panel");
+    assert_ne!(ids_after[0], ids_after[1], "overlay is not the base layer");
+
+    harness.render_root().remove_layer(ids_after[1]);
+    assert_eq!(
+        harness.render_root().layer_root_ids(),
+        ids_before,
+        "remove_layer restores the base-only stack"
+    );
+}
+
 // --- TextInput debug text ---
 
 #[test]
