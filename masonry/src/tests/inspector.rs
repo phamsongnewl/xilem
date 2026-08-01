@@ -1,18 +1,32 @@
 // Copyright 2026 the Xilem Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests for the inspector-facing accessors (`WidgetId::to_raw`, `QueryCtx` getters).
+//! Tests for the inspector-facing accessors (`WidgetId::to_raw`, `QueryCtx` getters)
+//! and the inspector event listener (`InspectorEvent`, pointer pass hook).
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use masonry_testing::TestHarness;
 
-use crate::core::NewWidget;
+use crate::core::{InspectorEvent, NewWidget, WidgetId};
 use crate::theme::test_property_set;
-use crate::widgets::{Button, Flex, Label};
+use crate::widgets::{Button, ButtonPress, Flex, Label};
 
 fn harness_with_button() -> TestHarness<Flex> {
     let button = Button::new(NewWidget::new(Label::new("Hi")));
     let flex = Flex::row().with_fixed(NewWidget::new(button));
     TestHarness::create_with_size(test_property_set(), NewWidget::new(flex), (400, 300))
+}
+
+/// Id of the button (only child of the root flex).
+fn harness_button_id(harness: &TestHarness<Flex>) -> WidgetId {
+    harness
+        .get_widget_with_id(harness.root_id())
+        .children()
+        .first()
+        .unwrap()
+        .id()
 }
 
 #[test]
@@ -74,4 +88,93 @@ fn query_ctx_disabled_flag_reflects_disable() {
     harness.render();
     let root = harness.get_widget_with_id(harness.root_id());
     assert!(root.ctx().is_disabled());
+}
+
+// --- Inspector event listener ---
+
+#[test]
+fn listener_receives_pointer_down_with_target_and_path() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+
+    // InspectorEvent borrows pass data; the listener converts to owned facts
+    // (raw ids) so the summary can outlive the pass.
+    let summary: Rc<RefCell<Vec<(Option<u64>, Vec<u64>)>>> = Rc::new(RefCell::new(Vec::new()));
+    let summary2 = summary.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Pointer { target, path, .. } = ev {
+                summary2.borrow_mut().push((
+                    target.map(|t| t.to_raw()),
+                    path.iter().map(|p| p.to_raw()).collect(),
+                ));
+            }
+        })));
+
+    // Click the button: Move, Down, Up.
+    harness.mouse_click_on(button_id, None);
+
+    let got = summary.borrow();
+    assert_eq!(got.len(), 3, "Move, Down and Up each observed: {got:?}");
+    for (target, path) in got.iter() {
+        assert!(target.is_some(), "click has a hit target: {got:?}");
+        assert!(path.len() >= 2, "path goes root -> leaf, got {path:?}");
+        assert_eq!(path.last(), target.as_ref(), "path leaf is the target");
+    }
+}
+
+#[test]
+fn listener_pointer_event_on_empty_area_has_none_target() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let summary: Rc<RefCell<Vec<Option<u64>>>> = Rc::new(RefCell::new(Vec::new()));
+    let s2 = summary.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Pointer { target, .. } = ev {
+                s2.borrow_mut().push(target.map(|t| t.to_raw()));
+            }
+        })));
+    // Move, press, release outside the window: no widget covers that point.
+    harness.mouse_move((500.0, 500.0));
+    harness.mouse_button_press(None);
+    harness.mouse_button_release(None);
+    let got = summary.borrow();
+    assert!(
+        got.contains(&None),
+        "empty-area events fire with target None: {got:?}"
+    );
+}
+
+#[test]
+fn listener_not_set_does_not_fire() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    // No listener set: the pass must dispatch exactly as before.
+    harness.mouse_click_on(button_id, None);
+    assert!(
+        harness.pop_action::<ButtonPress>().is_some(),
+        "click still reaches the button without a listener"
+    );
+}
+
+#[test]
+fn clearing_listener_stops_events() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    let count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let c2 = count.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |_| {
+            c2.set(c2.get() + 1);
+        })));
+    harness.render_root().set_inspector_event_listener(None);
+    harness.mouse_click_on(button_id, None);
+    assert_eq!(count.get(), 0);
 }

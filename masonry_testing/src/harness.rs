@@ -888,6 +888,11 @@ impl<W: Widget> TestHarness<W> {
         self.render_root.set_default_properties(default_properties);
     }
 
+    /// Returns a mutable reference to the underlying [`RenderRoot`].
+    pub fn render_root(&mut self) -> &mut RenderRoot {
+        &mut self.render_root
+    }
+
     /// Returns a [`WidgetRef`] to the widget with the given id.
     ///
     /// # Panics

@@ -6,9 +6,9 @@ use tracing::{info_span, trace};
 use crate::app::{RenderRoot, RenderRootSignal};
 use crate::core::keyboard::{Key, KeyState, NamedKey};
 use crate::core::{
-    AccessEvent, EventCtx, Handled, Ime, PointerButtonEvent, PointerEvent, PointerGestureEvent,
-    PointerInfo, PointerScrollEvent, PointerType, PointerUpdate, PropertiesMut, TextEvent, Widget,
-    WidgetId,
+    AccessEvent, EventCtx, Handled, Ime, InspectorEvent, PointerButtonEvent, PointerEvent,
+    PointerGestureEvent, PointerInfo, PointerScrollEvent, PointerType, PointerUpdate,
+    PropertiesMut, TextEvent, Widget, WidgetId,
 };
 use crate::dpi::{LogicalPosition, PhysicalPosition};
 use crate::passes::update::find_next_focusable;
@@ -161,6 +161,23 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
     }
     root.global_state.needs_pointer_pass = true;
 
+    // Hit-test once up front: used by the listener, the picker, and normal dispatch.
+    let target_widget_id = get_pointer_target(root, event_pos);
+
+    // The inspector listener observes the event before any picker short-circuit.
+    // The listener is temporarily taken out of the state so the hit path can be
+    // computed while it is held (borrow checker); it is always put back.
+    let mut listener = root.global_state.inspector_event_listener.take();
+    if let Some(listener) = listener.as_mut() {
+        let path = root.widget_path(target_widget_id);
+        listener(InspectorEvent::Pointer {
+            event,
+            target: target_widget_id,
+            path,
+        });
+    }
+    root.global_state.inspector_event_listener = listener;
+
     if root.global_state.inspector_state.is_picking_widget
         && matches!(event, PointerEvent::Move(..))
     {
@@ -172,7 +189,6 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
     if root.global_state.inspector_state.is_picking_widget
         && matches!(event, PointerEvent::Down { .. })
     {
-        let target_widget_id = get_pointer_target(root, event_pos);
         if let Some(target_widget_id) = target_widget_id {
             root.global_state
                 .emit_signal(RenderRootSignal::WidgetSelectedInInspector(
@@ -216,8 +232,6 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
             layer.capture_pointer_event(&mut ctx, &mut props, event);
         }
     }
-
-    let target_widget_id = get_pointer_target(root, event_pos);
 
     if matches!(event, PointerEvent::Down { .. })
         && let Some(target_widget_id) = target_widget_id
@@ -292,15 +306,19 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         root.global_state.window_focused = *focused;
     }
 
-    let target = root.global_state.focused_widget.filter(|&id| root.has_widget(id)).or_else(|| {
-        if let Some(focus_fallback) = root.global_state.focus_fallback
-            && root.is_still_interactive(focus_fallback)
-        {
-            Some(focus_fallback)
-        } else {
-            None
-        }
-    });
+    let target = root
+        .global_state
+        .focused_widget
+        .filter(|&id| root.has_widget(id))
+        .or_else(|| {
+            if let Some(focus_fallback) = root.global_state.focus_fallback
+                && root.is_still_interactive(focus_fallback)
+            {
+                Some(focus_fallback)
+            } else {
+                None
+            }
+        });
 
     let skip_if_disabled = !matches!(event, TextEvent::Ime(Ime::Disabled));
     let mut handled = run_event_pass(
