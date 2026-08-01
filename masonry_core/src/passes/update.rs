@@ -9,9 +9,9 @@ use ui_events::pointer::PointerType;
 
 use crate::app::{RenderRoot, RenderRootSignal, RenderRootState};
 use crate::core::{
-    ClassSetDiff, CursorIcon, DefaultProperties, Ime, PointerEvent, PointerInfo, PropertiesMut,
-    PropertiesRef, PropertyArena, PropertyCache, QueryCtx, RegisterCtx, TextEvent, Update,
-    UpdateCtx, Widget, WidgetArenaNode, WidgetId, WidgetState,
+    ClassSetDiff, CursorIcon, DefaultProperties, Ime, InspectorEvent, PointerEvent, PointerInfo,
+    PropertiesMut, PropertiesRef, PropertyArena, PropertyCache, QueryCtx, RegisterCtx, TextEvent,
+    Update, UpdateCtx, Widget, WidgetArenaNode, WidgetId, WidgetState,
 };
 use crate::passes::event::{run_on_pointer_event_pass, run_on_text_event_pass};
 use crate::passes::{enter_span, enter_span_if, merge_state_up, recurse_on_children};
@@ -796,6 +796,15 @@ pub(crate) fn run_update_focus_pass(root: &mut RenderRoot) {
 
     root.global_state.focused_widget = next_focused;
     root.global_state.focused_path = next_focused_path;
+
+    // NEW: inspector listener — only when the focused widget actually changed.
+    if root.global_state.focused_widget != prev_focused
+        && let Some(listener) = root.global_state.inspector_event_listener.as_mut()
+    {
+        listener(InspectorEvent::Focus {
+            widget: root.global_state.focused_widget,
+        });
+    }
 }
 
 // ----------------

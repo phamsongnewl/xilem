@@ -178,3 +178,74 @@ fn clearing_listener_stops_events() {
     harness.mouse_click_on(button_id, None);
     assert_eq!(count.get(), 0);
 }
+
+#[test]
+fn listener_receives_key_event_with_focused_widget() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    let got: Rc<RefCell<Vec<(bool, Option<u64>)>>> = Rc::new(RefCell::new(Vec::new()));
+    let g2 = got.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Text { focused, .. } = ev {
+                g2.borrow_mut().push((true, focused.map(|f| f.to_raw())));
+            }
+        })));
+    harness.focus_on(Some(button_id));
+    harness.keyboard_type_chars("a");
+    let got = got.borrow();
+    // Focus the button first so the Text event carries a focused id; the harness
+    // may deliver one or more Text events for 'a', so assert at least one.
+    assert!(
+        got.iter().any(|(is_text, _)| *is_text),
+        "key events observed: {got:?}"
+    );
+    assert_eq!(
+        got.iter().find(|(is_text, _)| *is_text).map(|(_, f)| *f),
+        Some(Some(button_id.to_raw())),
+        "Text event carries the focused button id: {got:?}"
+    );
+}
+
+#[test]
+fn listener_receives_action_with_source() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    let got: Rc<Cell<Option<u64>>> = Rc::new(Cell::new(None));
+    let g2 = got.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Action { source, .. } = ev {
+                g2.set(Some(source.to_raw()));
+            }
+        })));
+    harness.mouse_click_on(button_id, None);
+    assert_eq!(
+        got.get(),
+        Some(button_id.to_raw()),
+        "Action event carries the clicked widget as source"
+    );
+}
+
+#[test]
+fn listener_receives_focus_change() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    let got: Rc<Cell<Option<Option<u64>>>> = Rc::new(Cell::new(None));
+    let g2 = got.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Focus { widget } = ev {
+                g2.set(Some(widget.map(|w| w.to_raw())));
+            }
+        })));
+    harness.focus_on(Some(button_id));
+    let value = got.get().flatten();
+    assert_eq!(value, Some(button_id.to_raw()), "focus change observed");
+}

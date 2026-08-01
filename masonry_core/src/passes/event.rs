@@ -366,6 +366,12 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         }
     }
 
+    // NEW: inspector listener.
+    if let Some(listener) = root.global_state.inspector_event_listener.as_mut() {
+        let focused = root.global_state.focused_widget;
+        listener(InspectorEvent::Text { event, focused });
+    }
+
     trace!(
         focused_widget = root.global_state.focused_widget.map(|id| id.0),
         handled = handled.is_handled(),
