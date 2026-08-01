@@ -68,6 +68,8 @@ pub enum TextEvent {
 /// The listener is set via [`RenderRoot::set_inspector_event_listener`](crate::app::RenderRoot::set_inspector_event_listener).
 /// Events are delivered on the main thread during the corresponding pass, *after*
 /// the pass computed its data but *before* any inspector (picker) short-circuit.
+/// The picker additionally emits [`InspectorEvent::Pick`] when a picker click
+/// selects a widget (right before the selection signal fires).
 #[derive(Clone, Debug)]
 pub enum InspectorEvent<'a> {
     /// A pointer event, with the hit-tested target (None = empty area) and the
@@ -98,6 +100,11 @@ pub enum InspectorEvent<'a> {
     Focus {
         /// The newly focused widget; `None` when focus was lost.
         widget: Option<WidgetId>,
+    },
+    /// A widget was selected via the inspector picker (the picker consumed the click).
+    Pick {
+        /// The widget that was picked.
+        widget: WidgetId,
     },
 }
 

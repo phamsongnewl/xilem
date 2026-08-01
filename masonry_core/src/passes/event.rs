@@ -190,6 +190,14 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
         && matches!(event, PointerEvent::Down { .. })
     {
         if let Some(target_widget_id) = target_widget_id {
+            // The listener observes the pick right before the selection signal.
+            let mut listener = root.global_state.inspector_event_listener.take();
+            if let Some(listener) = listener.as_mut() {
+                listener(InspectorEvent::Pick {
+                    widget: target_widget_id,
+                });
+            }
+            root.global_state.inspector_event_listener = listener;
             root.global_state
                 .emit_signal(RenderRootSignal::WidgetSelectedInInspector(
                     target_widget_id,

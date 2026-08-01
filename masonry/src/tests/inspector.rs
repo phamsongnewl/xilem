@@ -271,6 +271,37 @@ fn set_picking_toggles_picker() {
     );
 }
 
+#[test]
+fn picker_emits_pick_event_for_hit_widget() {
+    let mut harness = harness_with_button();
+    harness.render();
+    let button_id = harness_button_id(&harness);
+    let picked: Rc<RefCell<Vec<u64>>> = Rc::new(RefCell::new(Vec::new()));
+    let p2 = picked.clone();
+    harness
+        .render_root()
+        .set_inspector_event_listener(Some(Box::new(move |ev| {
+            if let InspectorEvent::Pick { widget } = ev {
+                p2.borrow_mut().push(widget.to_raw());
+            }
+        })));
+
+    // Picking ON: the click hits the button -> exactly one Pick event with the
+    // button's id, and the picker consumed the click (no button action).
+    harness.render_root().set_picking(true);
+    harness.mouse_click_on(button_id, None);
+    let got = picked.borrow();
+    assert_eq!(
+        &*got,
+        &[button_id.to_raw()],
+        "exactly one Pick event with the picked widget id: {got:?}"
+    );
+    assert!(
+        harness.pop_action::<ButtonPress>().is_none(),
+        "picker consumed the click: no button action"
+    );
+}
+
 // --- Layer stack accessors (Task 17) ---
 
 #[test]
