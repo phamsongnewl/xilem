@@ -12,6 +12,7 @@ mod action;
 mod anim;
 mod compose;
 mod event;
+mod inspector;
 mod layout;
 mod mutate;
 mod paint;
