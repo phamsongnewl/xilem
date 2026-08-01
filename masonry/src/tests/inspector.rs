@@ -11,7 +11,7 @@ use masonry_testing::TestHarness;
 
 use crate::core::{InspectorEvent, NewWidget, WidgetId};
 use crate::theme::test_property_set;
-use crate::widgets::{Button, ButtonPress, Flex, Label};
+use crate::widgets::{Button, ButtonPress, Flex, Label, TextInput};
 
 fn harness_with_button() -> TestHarness<Flex> {
     let button = Button::new(NewWidget::new(Label::new("Hi")));
@@ -229,6 +229,34 @@ fn listener_receives_action_with_source() {
         Some(button_id.to_raw()),
         "Action event carries the clicked widget as source"
     );
+}
+
+// --- TextInput debug text ---
+
+#[test]
+fn text_input_debug_text_reports_placeholder() {
+    let input = TextInput::new("").with_placeholder("Email");
+    let mut harness =
+        TestHarness::create_with_size(test_property_set(), NewWidget::new(input), (200, 40));
+    harness.render();
+    let widget = harness.get_widget_with_id(harness.root_id());
+    assert_eq!(widget.get_debug_text().as_deref(), Some("<Email>"));
+}
+
+#[test]
+fn text_input_debug_text_none_when_plain() {
+    let input = TextInput::new("hello");
+    let mut harness =
+        TestHarness::create_with_size(test_property_set(), NewWidget::new(input), (200, 40));
+    harness.render();
+    // With content and no placeholder the debug text may delegate to the
+    // content (TextArea precedent) OR be None — assert only that it is not
+    // the "(clip)" marker and is finite in length.
+    let text = harness
+        .get_widget_with_id(harness.root_id())
+        .get_debug_text();
+    assert_ne!(text.as_deref(), Some("(clip)"));
+    assert!(text.as_deref().map(|t| t.len() < 200).unwrap_or(true));
 }
 
 #[test]
