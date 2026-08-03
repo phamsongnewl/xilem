@@ -357,6 +357,25 @@ impl MutateCtx<'_> {
         self.widget_state.property_cache.invalidated = true;
         self.widget_state.property_stack_id = Some(stack_id);
     }
+
+    /// Sends a signal to parent widgets to scroll this widget's border-box into view.
+    pub fn request_scroll_to_this(&mut self) {
+        let rect = self.widget_state.border_box();
+        self.global_state
+            .scroll_request_targets
+            .push((self.widget_state.id, rect));
+    }
+
+    /// Sends a signal to parent widgets to scroll the provided `rect` into view.
+    ///
+    /// The `rect` must be in this widget's content-box coordinate space.
+    pub fn request_scroll_to(&mut self, rect: Rect) {
+        // Convert from this widget's content-box space to border-box space.
+        let rect = rect + self.widget_state.border_box_translation();
+        self.global_state
+            .scroll_request_targets
+            .push((self.widget_state.id, rect));
+    }
 }
 
 // --- MARK: WIDGET_REF
@@ -571,6 +590,33 @@ impl_context_method!(ActionCtx<'_>, EventCtx<'_>, {
                 self.widget_id()
             );
         }
+    }
+});
+
+// Focus request methods for the update pass. Needed by widgets that must
+// take focus when they are first added to the tree (e.g. auto-focusing
+// the search input when the search bar appears) — the update pass is the
+// only pass that runs for newly added widgets.
+impl_context_method!(UpdateCtx<'_>, {
+    /// Requests [text focus].
+    ///
+    /// Because only one widget can be focused at a time, multiple focus requests
+    /// from different widgets during a single event cycle means that the last
+    /// widget that requests focus will override the previous requests.
+    ///
+    /// [text focus]: crate::doc::masonry_concepts#text-focus
+    pub fn request_focus(&mut self) {
+        trace!("request_focus");
+        let id = self.widget_id();
+        self.global_state.next_focused_widget = Some(id);
+    }
+
+    /// Transfers [text focus] to the widget with the given `WidgetId`.
+    ///
+    /// [text focus]: crate::doc::masonry_concepts#text-focus
+    pub fn set_focus(&mut self, target: WidgetId) {
+        trace!("set_focus target={:?}", target);
+        self.global_state.next_focused_widget = Some(target);
     }
 });
 
