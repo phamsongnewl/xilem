@@ -723,9 +723,7 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                     // implement find-input shortcuts without inserting the
                     // shortcut letter into the text area.
                     Key::Character(text)
-                        if EDITABLE
-                            && action_mod
-                            && text.as_str().eq_ignore_ascii_case("f") =>
+                        if EDITABLE && action_mod && text.as_str().eq_ignore_ascii_case("f") =>
                     {
                         return;
                     }
