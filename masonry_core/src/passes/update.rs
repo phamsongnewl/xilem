@@ -643,6 +643,16 @@ pub(crate) fn run_update_focus_pass(root: &mut RenderRoot) {
         && !root.has_widget(id)
     {
         root.global_state.focused_widget = None;
+        // The platform IME session belonged to the destroyed widget. End it
+        // here: after the clear above, `prev_focused == next_focused == None`
+        // so the IME-disable path below never runs and `is_ime_active` would
+        // stay stale — panicking later in run_rewrite_passes ("IME is active
+        // without a focused widget"). If another widget already requested
+        // focus, its own IME state is (re)established by the refocus block.
+        if root.global_state.is_ime_active {
+            root.global_state.is_ime_active = false;
+            root.global_state.emit_signal(RenderRootSignal::EndIme);
+        }
     }
 
     // When focus is lost with no pending recipient, auto-restore it
