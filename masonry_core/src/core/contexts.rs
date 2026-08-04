@@ -593,11 +593,10 @@ impl_context_method!(ActionCtx<'_>, EventCtx<'_>, {
     }
 });
 
-// Focus request methods for the update pass. Needed by widgets that must
-// take focus when they are first added to the tree (e.g. auto-focusing
-// the search input when the search bar appears) — the update pass is the
-// only pass that runs for newly added widgets.
-impl_context_method!(UpdateCtx<'_>, {
+// Focus request methods for update and mutate passes. UpdateCtx is needed
+// when widgets first enter the tree; MutateCtx is needed when a Xilem view
+// requests focus during a rebuild of an existing widget.
+impl_context_method!(MutateCtx<'_>, UpdateCtx<'_>, {
     /// Requests [text focus].
     ///
     /// Because only one widget can be focused at a time, multiple focus requests
