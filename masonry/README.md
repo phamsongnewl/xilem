@@ -93,7 +93,7 @@ impl AppDriver for Driver {
     fn on_action(
         &mut self,
         window_id: WindowId,
-        ctx: &mut DriverCtx<'_, '_>,
+        ctx: &mut DriverCtx<'_>,
         _widget_id: WidgetId,
         action: ErasedAction,
     ) {
@@ -208,7 +208,7 @@ If you want to use your own subscriber, simply set it before starting masonry - 
 
 ## Minimum supported Rust Version (MSRV)
 
-This version of Masonry has been verified to compile with **Rust 1.92** and later.
+This version of Masonry has been verified to compile with **Rust 1.96** and later.
 
 Future versions of Masonry might increase the Rust version requirement.
 It will not be treated as a breaking change and as such can even happen with small patch releases.

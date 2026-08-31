@@ -239,7 +239,7 @@ impl Debug for Window {
 /// If you run Masonry from an external Winit event loop, create a
 /// `MasonryState` via [`MasonryState::new`] and forward events to it via the appropriate method (e.g.,
 /// calling [`handle_window_event`](MasonryState::handle_window_event) in [`window_event`](ApplicationHandler::window_event)).
-pub struct MasonryState<'a> {
+pub struct MasonryState {
     /// The event loop is suspended when the app is e.g. in the background on Android.
     /// We aren't allowed to have any `Surface`s, and we also don't expect to receive any events.
     /// See [`ApplicationHandler::suspended()`] for details.
@@ -254,7 +254,7 @@ pub struct MasonryState<'a> {
 
     window_id_to_handle_id: HashMap<WindowId, HandleId>,
 
-    surfaces: HashMap<HandleId, RenderSurface<'a>>,
+    surfaces: HashMap<HandleId, RenderSurface<'static>>,
     windows: HashMap<HandleId, Window>,
     /// On Metal, we need to track the state of resize requests to avoid jitter.
     #[cfg(target_os = "macos")]
@@ -276,8 +276,8 @@ pub struct MasonryState<'a> {
 }
 
 // TODO - Merge into MasonryState?
-struct MainState<'a> {
-    masonry_state: MasonryState<'a>,
+struct MainState {
+    masonry_state: MasonryState,
     app_driver: Box<dyn AppDriver>,
 }
 
@@ -334,7 +334,7 @@ pub fn run_with(
     event_loop.run_app(&mut main_state)
 }
 
-impl ApplicationHandler<MasonryUserEvent> for MainState<'_> {
+impl ApplicationHandler<MasonryUserEvent> for MainState {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.masonry_state
             .handle_resumed(event_loop, &mut *self.app_driver);
@@ -398,7 +398,7 @@ impl ApplicationHandler<MasonryUserEvent> for MainState<'_> {
     }
 }
 
-impl<'a> Debug for MasonryState<'a> {
+impl Debug for MasonryState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MasonryState")
             .field("is_suspended", &self.is_suspended)
@@ -418,7 +418,7 @@ impl<'a> Debug for MasonryState<'a> {
     }
 }
 
-impl MasonryState<'_> {
+impl MasonryState {
     /// Creates the Masonry application's composition root.
     ///
     /// - `event_loop_proxy`: a queue provided by [`EventLoop::create_proxy`](winit::event_loop::EventLoop::create_proxy) to send custom events (mostly accessibility) to your event loop.
@@ -448,7 +448,7 @@ impl MasonryState<'_> {
             clipboard_cx.unwrap()
         };
 
-        MasonryState {
+        Self {
             is_suspended: true,
             render_cx,
             renderer: ImagingRenderer::new(),
@@ -899,11 +899,17 @@ impl MasonryState<'_> {
                         && action_mod
                         && k.state == KeyState::Down
                     {
-                        let text = self.clipboard_cx.get_contents().unwrap_or_default();
-                        let custom = self.clipboard_multi.get_rich();
-                        window
-                            .render_root
-                            .handle_text_event(TextEvent::ClipboardPasteMulti { text, custom });
+                        match self.clipboard_cx.get_contents() {
+                            Ok(text) => {
+                                let custom = self.clipboard_multi.get_rich();
+                                window.render_root.handle_text_event(
+                                    TextEvent::ClipboardPasteMulti { text, custom },
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(?error, "Unable to read clipboard contents");
+                            }
+                        }
                     } else {
                         window.render_root.handle_text_event(TextEvent::Keyboard(k));
                     }
@@ -1245,11 +1251,11 @@ impl MasonryState<'_> {
     }
 }
 
-fn create_surface<'s>(
+fn create_surface(
     render_cx: &mut RenderContext,
     handle: Arc<WindowHandle>,
     size: PhysicalSize<u32>,
-) -> RenderSurface<'s> {
+) -> RenderSurface<'static> {
     assert!(
         size.width != 0 && size.height != 0,
         "cannot create a surface with a width or height of zero"
