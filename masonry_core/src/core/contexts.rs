@@ -20,10 +20,10 @@ use tree_arena::{ArenaMut, ArenaMutList, ArenaRefList};
 
 use crate::app::{MutateCallback, RenderRootSignal, RenderRootState};
 use crate::core::{
-    AllowRawMut, BrushIndex, ClassSet, ErasedAction, FromDynWidget, LayerType, NewWidget,
-    PaintLayerMode, PropertiesMut, PropertiesRef, PropertyArena, PropertyCache, PropertyStackId,
-    ResizeDirection, Widget, WidgetArenaNode, WidgetId, WidgetMut, WidgetPod, WidgetRef,
-    WidgetState,
+    AllowRawMut, BrushIndex, ClassSet, ClipboardFormat, ErasedAction, FromDynWidget, LayerType,
+    NewWidget, PaintLayerMode, PropertiesMut, PropertiesRef, PropertyArena, PropertyCache,
+    PropertyStackId, ResizeDirection, Widget, WidgetArenaNode, WidgetId, WidgetMut, WidgetPod,
+    WidgetRef, WidgetState,
 };
 use crate::kurbo::{Affine, Axis, Insets, Point, Rect, Size, Vec2};
 use crate::layout::{LayoutSize, LenDef, Length, SizeDef};
@@ -357,6 +357,25 @@ impl MutateCtx<'_> {
         self.widget_state.property_cache.invalidated = true;
         self.widget_state.property_stack_id = Some(stack_id);
     }
+
+    /// Sends a signal to parent widgets to scroll this widget's border-box into view.
+    pub fn request_scroll_to_this(&mut self) {
+        let rect = self.widget_state.border_box();
+        self.global_state
+            .scroll_request_targets
+            .push((self.widget_state.id, rect));
+    }
+
+    /// Sends a signal to parent widgets to scroll the provided `rect` into view.
+    ///
+    /// The `rect` must be in this widget's content-box coordinate space.
+    pub fn request_scroll_to(&mut self, rect: Rect) {
+        // Convert from this widget's content-box space to border-box space.
+        let rect = rect + self.widget_state.border_box_translation();
+        self.global_state
+            .scroll_request_targets
+            .push((self.widget_state.id, rect));
+    }
 }
 
 // --- MARK: WIDGET_REF
@@ -570,6 +589,54 @@ impl_context_method!(ActionCtx<'_>, EventCtx<'_>, {
                  or one of its ancestors.",
                 self.widget_id()
             );
+        }
+    }
+});
+
+// Focus request methods for update and mutate passes. UpdateCtx is needed
+// when widgets first enter the tree; MutateCtx is needed when a Xilem view
+// requests focus during a rebuild of an existing widget.
+impl_context_method!(MutateCtx<'_>, UpdateCtx<'_>, {
+    /// Requests [text focus].
+    ///
+    /// Because only one widget can be focused at a time, multiple focus requests
+    /// from different widgets during a single event cycle means that the last
+    /// widget that requests focus will override the previous requests.
+    ///
+    /// [text focus]: crate::doc::masonry_concepts#text-focus
+    pub fn request_focus(&mut self) {
+        trace!("request_focus");
+        let id = self.widget_id();
+        self.global_state.next_focused_widget = Some(id);
+    }
+
+    /// Transfers [text focus] to the widget with the given `WidgetId`.
+    ///
+    /// [text focus]: crate::doc::masonry_concepts#text-focus
+    pub fn set_focus(&mut self, target: WidgetId) {
+        trace!("set_focus target={:?}", target);
+        self.global_state.next_focused_widget = Some(target);
+    }
+});
+
+// Focus-fallback methods shared by update, event, and action contexts.
+impl_context_method!(ActionCtx<'_>, EventCtx<'_>, UpdateCtx<'_>, {
+    /// Registers this widget as the focus fallback.
+    ///
+    /// When no widget has focus and no focus transfer is pending, the system
+    /// will auto-assign focus to the registered fallback.
+    pub fn set_self_as_focus_fallback(&mut self) {
+        let id = self.widget_id();
+        self.global_state.focus_fallback = Some(id);
+    }
+
+    /// If no focus transfer is pending, requests focus for this widget.
+    ///
+    /// Used when this widget loses focus to reclaim it when no other widget
+    /// takes over.
+    pub fn reclaim_focus_if_none(&mut self) {
+        if self.global_state.next_focused_widget.is_none() {
+            self.global_state.next_focused_widget = Some(self.widget_id());
         }
     }
 });
@@ -1898,6 +1965,17 @@ impl_context_method!(
             trace!("set_clipboard");
             self.global_state
                 .emit_signal(RenderRootSignal::ClipboardStore(contents));
+        }
+
+        /// Store multiple clipboard representations in one atomic operation.
+        /// Backends map each [`ClipboardFormat`] to a native format.
+        ///
+        /// Falls back to `set_clipboard(String)` semantics for backends that only
+        /// support a single String (they pick the `text/plain` format).
+        pub fn set_clipboard_multi(&mut self, formats: Vec<ClipboardFormat>) {
+            trace!("set_clipboard_multi");
+            self.global_state
+                .emit_signal(RenderRootSignal::ClipboardStoreMulti(formats));
         }
 
         /// Starts a window drag.

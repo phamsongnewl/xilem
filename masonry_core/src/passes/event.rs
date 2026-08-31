@@ -292,7 +292,7 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         root.global_state.window_focused = *focused;
     }
 
-    let target = root.global_state.focused_widget.or_else(|| {
+    let target = root.global_state.focused_widget.filter(|&id| root.has_widget(id)).or_else(|| {
         if let Some(focus_fallback) = root.global_state.focus_fallback
             && root.is_still_interactive(focus_fallback)
         {

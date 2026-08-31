@@ -64,7 +64,9 @@ impl<State> View<State, (), ViewCtx> for MasonryRoot<State> {
             );
             root_id = Some(root.widget.inner_id());
         });
-        render_root.set_focus_fallback(root_id);
+        if render_root.focus_fallback().is_none() {
+            render_root.set_focus_fallback(root_id);
+        }
         if cfg!(debug_assertions) && !render_root.needs_rewrite_passes() {
             tracing::debug!("Widget tree didn't change as result of rebuild");
         }

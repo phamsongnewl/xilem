@@ -726,6 +726,14 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                     Key::Named(NamedKey::Escape) => {
                         ctx.submit_action::<Self::Action>(TextAction::Cancelled);
                     }
+                    // Leave Ctrl/Cmd+F unhandled so ancestor widgets can
+                    // implement find-input shortcuts without inserting the
+                    // shortcut letter into the text area.
+                    Key::Character(text)
+                        if EDITABLE && action_mod && text.as_str().eq_ignore_ascii_case("f") =>
+                    {
+                        return;
+                    }
                     Key::Character(text) if EDITABLE => {
                         self.editor
                             .driver(fctx, lctx)
@@ -799,7 +807,8 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                 }
             }
 
-            TextEvent::ClipboardPaste(text) => {
+            TextEvent::ClipboardPasteMulti { text, custom: _ }
+            | TextEvent::ClipboardPaste(text) => {
                 if EDITABLE {
                     let (fctx, lctx) = ctx.text_contexts();
                     self.editor

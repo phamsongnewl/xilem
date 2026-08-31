@@ -18,9 +18,10 @@ use tree_arena::{ArenaMut, TreeArena};
 use crate::app::VisualLayerPlan;
 use crate::app::layer_stack::LayerStack;
 use crate::core::{
-    AccessCtx, AccessEvent, BrushIndex, CursorIcon, DefaultProperties, ErasedAction, FromDynWidget,
-    Handled, Ime, LayerType, NewWidget, PointerEvent, PropertiesRef, PropertyArena, PropertyStack,
-    PropertyStackId, QueryCtx, ResizeDirection, TextEvent, Widget, WidgetArena, WidgetArenaNode,
+    AccessCtx, AccessEvent, BrushIndex, ClipboardFormat, CursorIcon, DefaultProperties,
+    ErasedAction, FromDynWidget, Handled, Ime, LayerType, NewWidget, PointerEvent, PropertiesRef,
+    PropertyArena, PropertyStack, PropertyStackId, QueryCtx, ResizeDirection, TextEvent, Widget,
+    WidgetArena, WidgetArenaNode,
     WidgetId, WidgetMut, WidgetPod, WidgetRef, WidgetState, WidgetTag, WidgetTagInner, WindowEvent,
 };
 use crate::imaging::record::Scene;
@@ -238,6 +239,8 @@ pub enum RenderRootSignal {
     ImeMoved(LogicalPosition<f64>, LogicalSize<f64>),
     /// A user interaction has sent something to the clipboard.
     ClipboardStore(String),
+    /// A user interaction has sent multiple clipboard formats.
+    ClipboardStoreMulti(Vec<ClipboardFormat>),
     /// The window needs to be redrawn.
     RequestRedraw,
     /// The window should be redrawn for an animation frame. Currently this isn't really different from `RequestRedraw`.
@@ -956,6 +959,11 @@ impl RenderRoot {
     /// Returns the [`WidgetId`] of the [focused widget](crate::doc::masonry_concepts#text-focus).
     pub fn focused_widget(&self) -> Option<WidgetId> {
         self.global_state.focused_widget
+    }
+
+    /// Returns the [`WidgetId`] of the [focus fallback](crate::doc::masonry_concepts#focus-fallback).
+    pub fn focus_fallback(&self) -> Option<WidgetId> {
+        self.global_state.focus_fallback
     }
 
     /// Returns the [`WidgetId`] of the widget which [captures pointer events](crate::doc::masonry_concepts#pointer-capture).

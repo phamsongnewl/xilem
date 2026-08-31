@@ -491,6 +491,12 @@ impl<W: Widget> TestHarness<W> {
                 RenderRootSignal::ClipboardStore(text) => {
                     self.clipboard = text;
                 }
+                RenderRootSignal::ClipboardStoreMulti(formats) => {
+                    // Store text/plain as clipboard text for test assertions.
+                    if let Some(text) = formats.iter().find(|f| f.mime == "text/plain") {
+                        self.clipboard = String::from_utf8_lossy(&text.data).to_string();
+                    }
+                }
                 RenderRootSignal::RequestRedraw => (),
                 RenderRootSignal::RequestAnimFrame => (),
                 RenderRootSignal::TakeFocus => (),

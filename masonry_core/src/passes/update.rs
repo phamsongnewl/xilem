@@ -638,6 +638,34 @@ pub(crate) fn run_update_focus_pass(root: &mut RenderRoot) {
         root.global_state.focus_fallback = None;
     }
 
+    // Clear stale focused_widget if the previously focused widget was destroyed.
+    if let Some(id) = root.global_state.focused_widget
+        && !root.has_widget(id)
+    {
+        root.global_state.focused_widget = None;
+        // The platform IME session belonged to the destroyed widget. End it
+        // here: after the clear above, `prev_focused == next_focused == None`
+        // so the IME-disable path below never runs and `is_ime_active` would
+        // stay stale — panicking later in run_rewrite_passes ("IME is active
+        // without a focused widget"). If another widget already requested
+        // focus, its own IME state is (re)established by the refocus block.
+        if root.global_state.is_ime_active {
+            root.global_state.is_ime_active = false;
+            root.global_state.emit_signal(RenderRootSignal::EndIme);
+        }
+    }
+
+    // When focus is lost with no pending recipient, auto-restore it
+    // to the focus fallback (if set).  This keeps keyboard events
+    // flowing to a sensible widget after editing finishes or the
+    // previously focused widget is torn down.
+    if root.global_state.focus_fallback.is_some()
+        && root.global_state.next_focused_widget.is_none()
+        && root.global_state.focused_widget.is_none()
+    {
+        root.global_state.next_focused_widget = root.global_state.focus_fallback;
+    }
+
     let prev_focused = root.global_state.focused_widget;
     let was_ime_active = root.global_state.is_ime_active;
 

@@ -2503,6 +2503,7 @@ name = "masonry_winit"
 version = "0.4.0"
 dependencies = [
  "accesskit_winit",
+ "clipboard-win",
  "copypasta",
  "masonry",
  "masonry_core",
