@@ -47,7 +47,7 @@ use crate::vello_util::{RenderContext, RenderSurface};
 ///
 /// The closure itself must be `Send`, since it is created on the sending
 /// thread and crosses threads inside the `Arc`.
-type CallbackPayload = Arc<Mutex<Option<Box<dyn for<'a> FnOnce(&mut MasonryState<'a>) + Send>>>>;
+type CallbackPayload = Arc<Mutex<Option<Box<dyn FnOnce(&mut MasonryState) + Send>>>>;
 /// The custom event type that we inject into winit's [`EventLoop`](winit::event_loop::EventLoop).
 ///
 /// This represents the types that can be emitted during the event loop, but aren't emitted
