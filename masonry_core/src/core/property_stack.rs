@@ -17,7 +17,7 @@ pub struct PropertyStackId(pub(crate) NonZeroU64);
 /// Each layer of the stack consists of a [`Selector`] and a set of properties.
 /// When resolving a property, the stack is traversed from top to bottom until
 /// a matching selector with the requested property is found.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PropertyStack {
     pub(crate) stack: Vec<(Selector, PropertySet)>,
 }
@@ -61,8 +61,35 @@ impl PropertyStack {
     /// Pushes a new entry onto the stack.
     ///
     /// The selector is used to determine whether the entry applies to a given widget based on its class set.
-    pub fn push(&mut self, selector: Selector, properties: impl Into<PropertySet>) {
+    pub fn push_layer(&mut self, selector: Selector, properties: impl Into<PropertySet>) {
         self.stack.push((selector, properties.into()));
+    }
+
+    /// Get the mutable reference a property set for the given index.
+    ///
+    /// Return [`None`] if the index is out of bounds.
+    pub fn get_layer_mut(&mut self, index: usize) -> Option<&mut PropertySet> {
+        Some(&mut self.stack.get_mut(index)?.1)
+    }
+
+    /// Remove a property set with its given index.
+    pub fn remove_layer(&mut self, index: usize) {
+        self.stack.remove(index);
+    }
+
+    /// Insert a new property set at the given index.
+    pub fn insert_layer(
+        &mut self,
+        index: usize,
+        selector: Selector,
+        properties: impl Into<PropertySet>,
+    ) {
+        self.stack.insert(index, (selector, properties.into()));
+    }
+
+    /// Get the property stack layers.
+    pub fn get_layers(&self) -> &[(Selector, PropertySet)] {
+        &self.stack
     }
 
     fn get_prop<P: Property>(&self, maybe_index: Option<usize>) -> Option<&P> {

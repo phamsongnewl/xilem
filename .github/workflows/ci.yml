@@ -3,12 +3,12 @@ env:
   # version like 1.70. Note that we only specify MAJOR.MINOR and not PATCH so that bugfixes still
   # come automatically. If the version specified here is no longer the latest stable version,
   # then please feel free to submit a PR that adjusts it along with the potential clippy fixes.
-  RUST_STABLE_VER: "1.95" # In quotes because otherwise (e.g.) 1.70 would be interpreted as 1.7
+  RUST_STABLE_VER: "1.97.1" # In quotes because otherwise (e.g.) 1.70 would be interpreted as 1.7
   # The purpose of checking with the minimum supported Rust toolchain is to detect its staleness.
   # If the compilation fails, then the version specified here needs to be bumped up to reality.
   # Be sure to also update the rust-version property in the workspace Cargo.toml file,
   # plus all the README.md files of the affected packages.
-  RUST_MIN_VER: "1.92"
+  RUST_MIN_VER: "1.96"
   # List of packages that can not target Wasm.
   NO_WASM_PKGS: >-
     --exclude masonry_core
@@ -265,15 +265,16 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libfontconfig1-dev
 
-      # Adapted from https://github.com/bevyengine/bevy/blob/b446374392adc70aceb92621b080d1a6cf7a7392/.github/workflows/validation-jobs.yml#L74-L79
       - name: Install xvfb, llvmpipe and lavapipe
         if: runner.os == 'Linux'
-        # https://launchpad.net/~kisak/+archive/ubuntu/turtle
         run: |
           sudo apt-get update -y -qq
-          sudo add-apt-repository ppa:kisak/turtle -y
-          sudo apt-get update
-          sudo apt install -y xvfb libegl-mesa0 libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libegl-mesa0 \
+            libgl1-mesa-dri \
+            libxcb-xfixes0-dev \
+            mesa-vulkan-drivers
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -297,7 +298,7 @@ jobs:
 
       - name: Run cargo nextest on unsafe arena
         run: cargo nextest run -p tree_arena --locked --no-fail-fast --no-default-features
-  
+
       - name: Upload test results due to failure
         uses: actions/upload-artifact@v4
         if: failure()

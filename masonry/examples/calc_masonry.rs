@@ -149,7 +149,7 @@ impl AppDriver for CalcState {
     fn on_action(
         &mut self,
         window_id: WindowId,
-        ctx: &mut DriverCtx<'_, '_>,
+        ctx: &mut DriverCtx<'_>,
         widget_id: WidgetId,
         action: ErasedAction,
     ) {
@@ -265,29 +265,29 @@ fn custom_property_set() -> DefaultProperties {
     let mut default_properties = default_property_set();
 
     let mut stack = PropertyStack::new();
-    stack.push(
+    stack.push_layer(
         Selector::classes(&["op_button"]),
         PropertySet::new()
             .with(Background::Color(BLUE))
             .with(BorderColor::new(Color::TRANSPARENT))
             .with(BorderWidth::all(2.px())),
     );
-    stack.push(
+    stack.push_layer(
         Selector::classes(&["op_button"]).with_active(true),
         PropertySet::new().with(Background::Color(LIGHT_BLUE)),
     );
-    stack.push(
+    stack.push_layer(
         Selector::classes(&["digit_button"]),
         PropertySet::new()
             .with(Background::Color(GRAY))
             .with(BorderColor::new(Color::TRANSPARENT))
             .with(BorderWidth::all(2.px())),
     );
-    stack.push(
+    stack.push_layer(
         Selector::classes(&["digit_button"]).with_active(true),
         PropertySet::new().with(Background::Color(LIGHT_GRAY)),
     );
-    stack.push(
+    stack.push_layer(
         Selector::new().with_hovered(true),
         PropertySet::new().with(BorderColor::new(Color::WHITE)),
     );
