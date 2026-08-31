@@ -19,9 +19,9 @@ use crate::app::VisualLayerPlan;
 use crate::app::layer_stack::LayerStack;
 use crate::core::{
     AccessCtx, AccessEvent, BrushIndex, CursorIcon, DefaultProperties, ErasedAction, FromDynWidget,
-    Handled, Ime, LayerType, NewWidget, PointerEvent, PropertiesRef, PropertyArena, QueryCtx,
-    ResizeDirection, TextEvent, Widget, WidgetArena, WidgetArenaNode, WidgetId, WidgetMut,
-    WidgetPod, WidgetRef, WidgetState, WidgetTag, WidgetTagInner, WindowEvent,
+    Handled, Ime, LayerType, NewWidget, PointerEvent, PropertiesRef, PropertyArena, PropertyStack,
+    PropertyStackId, QueryCtx, ResizeDirection, TextEvent, Widget, WidgetArena, WidgetArenaNode,
+    WidgetId, WidgetMut, WidgetPod, WidgetRef, WidgetState, WidgetTag, WidgetTagInner, WindowEvent,
 };
 use crate::imaging::record::Scene;
 use crate::passes::accessibility::run_accessibility_pass;
@@ -1013,6 +1013,86 @@ impl RenderRoot {
     #[doc(hidden)]
     pub fn emit_signal(&mut self, signal: RenderRootSignal) {
         self.global_state.emit_signal(signal);
+    }
+}
+
+// --- MARK: PROPERTY STACK EDITS
+impl RenderRoot {
+    /// Replace a [`PropertyStack`] to a new one stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no property stack with the given id in the [`PropertyArena`].
+    pub fn replace_property_stack(
+        &mut self,
+        property_stack_id: PropertyStackId,
+        stack: PropertyStack,
+    ) {
+        let _ = self.property_arena.arena.insert(property_stack_id, stack);
+
+        self.invalidate_property_stack_resolution(property_stack_id);
+
+        self.run_rewrite_passes();
+    }
+
+    /// Checks if a property stack with the given id is in the property arena.
+    pub fn has_property_stack(&self, property_stack_id: PropertyStackId) -> bool {
+        self.property_arena.arena.contains_key(&property_stack_id)
+    }
+
+    /// Remove a property stack with the given id in the property arena.
+    ///
+    /// This also invalidate the computed properties of any widget in the entire tree that is linked to that property stack,
+    /// and calls [`Widget::property_changed`] for every property previously
+    /// resolved by each widget.
+    pub fn remove_property_stack(&mut self, stack_id: PropertyStackId) {
+        // Don't proceed any further if nothing has been removed
+        if self.property_arena.arena.remove(&stack_id).is_none() {
+            return;
+        }
+
+        self.invalidate_property_stack_resolution(stack_id);
+
+        self.run_rewrite_passes();
+    }
+
+    /// Add a property stack to the [`PropertyArena`] and returns its id.
+    pub fn insert_property_stack(&mut self, property_stack: PropertyStack) -> PropertyStackId {
+        self.property_arena.insert(property_stack)
+    }
+
+    /// Mark the node that is linked to this property stack for the update-properties pass: `need_update_props`
+    fn invalidate_property_stack_resolution(&mut self, stack_id: PropertyStackId) {
+        // Only mark the node that is linked to this property stack for the update-properties pass: `need_update_props`
+        fn invalidate_properties_resolution(
+            node: ArenaMut<'_, WidgetArenaNode>,
+            stack_id: PropertyStackId,
+        ) {
+            let children = node.children;
+            let widget = &mut *node.item.widget;
+            let state = &mut node.item.state;
+
+            // We tell the node state there some props update that needs to be done,
+            // since we can't tell in advance if its child has the property stack id.
+            // If not, the property changes will be not visible when we run the rewrite passes.
+            state.needs_update_props = true;
+
+            let is_linked_to_p_stack = state.property_stack_id == Some(stack_id);
+
+            if is_linked_to_p_stack {
+                state.request_update_props = true;
+                state.property_cache.invalidated = true;
+            }
+
+            let id = state.id;
+            recurse_on_children(id, widget, children, |node| {
+                invalidate_properties_resolution(node, stack_id);
+            });
+        }
+
+        let root_node = self.widget_arena.get_node_mut(self.root_id());
+
+        invalidate_properties_resolution(root_node, stack_id);
     }
 }
 

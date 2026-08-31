@@ -70,12 +70,12 @@ impl DemoPage for StepInputDemo {
 
         let mut stack = PropertyStack::new();
 
-        stack.push(
+        stack.push_layer(
             Selector::new(),
             (BorderWidth::all(2.px()), CornerRadius::all(20.px())),
         );
 
-        stack.push(
+        stack.push_layer(
             Selector::new(),
             (
                 Background::Color(AlphaColor::from_rgb8(0xf2, 0xf4, 0xf8)),
@@ -86,15 +86,15 @@ impl DemoPage for StepInputDemo {
                 BorderColor::new(AlphaColor::from_rgba8(0xf2, 0xf4, 0xf8, 0x7f)),
             ),
         );
-        stack.push(
+        stack.push_layer(
             Selector::new().with_disabled(false).with_hovered(true),
             BorderColor::new(AlphaColor::from_rgb8(0xf2, 0xf4, 0xf8)),
         );
-        stack.push(
+        stack.push_layer(
             Selector::new().with_disabled(false).with_focused(true),
             BorderColor::new(AlphaColor::from_rgb8(0x28, 0x8c, 0xd9)),
         );
-        stack.push(
+        stack.push_layer(
             Selector::new().with_disabled(true),
             (
                 ContentColor::new(DISABLED_TEXT_COLOR),
