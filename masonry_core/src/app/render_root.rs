@@ -19,10 +19,10 @@ use crate::app::VisualLayerPlan;
 use crate::app::layer_stack::LayerStack;
 use crate::core::{
     AccessCtx, AccessEvent, BrushIndex, ClipboardFormat, CursorIcon, DefaultProperties,
-    ErasedAction, FromDynWidget, Handled, Ime, LayerType, NewWidget, PointerEvent, PropertiesRef,
-    PropertyArena, PropertyStack, PropertyStackId, QueryCtx, ResizeDirection, TextEvent, Widget,
-    WidgetArena, WidgetArenaNode,
-    WidgetId, WidgetMut, WidgetPod, WidgetRef, WidgetState, WidgetTag, WidgetTagInner, WindowEvent,
+    ErasedAction, FromDynWidget, Handled, Ime, InspectorEvent, LayerType, NewWidget, PointerEvent,
+    PropertiesRef, PropertyArena, PropertyStack, PropertyStackId, QueryCtx, ResizeDirection,
+    TextEvent, Widget, WidgetArena, WidgetArenaNode, WidgetId, WidgetMut, WidgetPod, WidgetRef,
+    WidgetState, WidgetTag, WidgetTagInner, WindowEvent,
 };
 use crate::imaging::record::Scene;
 use crate::passes::accessibility::run_accessibility_pass;
@@ -163,6 +163,9 @@ pub(crate) struct RenderRootState {
 
     /// Internal state of the widget inspector.
     pub(crate) inspector_state: InspectorState,
+
+    /// Observer for the widget inspector.
+    pub(crate) inspector_event_listener: Option<Box<dyn for<'a> FnMut(InspectorEvent<'a>)>>,
 
     /// Whether the next accessibility pass tree should be updated during `render()`.
     pub(crate) access_tree_active: bool,
@@ -377,6 +380,7 @@ impl RenderRoot {
                     is_picking_widget: false,
                     hovered_widget: None,
                 },
+                inspector_event_listener: None,
                 access_tree_active: false,
                 scale_factor,
                 debug_paint,
@@ -409,6 +413,50 @@ impl RenderRoot {
         root.run_rewrite_passes();
 
         root
+    }
+
+    /// Sets (or clears) the inspector event listener.
+    ///
+    /// The listener runs on the main thread during event/action/focus passes.
+    /// It must not mutate the listener itself or the widget tree (contract).
+    pub fn set_inspector_event_listener(
+        &mut self,
+        listener: Option<Box<dyn for<'a> FnMut(InspectorEvent<'a>)>>,
+    ) {
+        self.global_state.inspector_event_listener = listener;
+    }
+
+    /// Enables/disables widget-picker mode (equivalent to the F11 toggle).
+    /// The cursor switches to a crosshair while picking, so the mode has
+    /// visible feedback.
+    pub fn set_picking(&mut self, enabled: bool) {
+        self.global_state.inspector_state.is_picking_widget = enabled;
+        self.global_state.inspector_state.hovered_widget = None;
+        self.global_state.cursor_icon = if enabled {
+            CursorIcon::Crosshair
+        } else {
+            CursorIcon::Default
+        };
+        self.global_state
+            .emit_signal(RenderRootSignal::SetCursor(self.global_state.cursor_icon));
+        self.root_state_mut().needs_paint = true;
+    }
+
+    /// Root-to-leaf path of the given widget (empty if the widget is not in the tree).
+    pub(crate) fn widget_path(&self, id: Option<WidgetId>) -> Vec<WidgetId> {
+        let Some(mut id) = id else {
+            return Vec::new();
+        };
+        if !self.widget_arena.has(id) {
+            return Vec::new();
+        }
+        let mut path = vec![id];
+        while let Some(parent) = self.widget_arena.parent_of(id) {
+            path.push(parent);
+            id = parent;
+        }
+        path.reverse();
+        path
     }
 
     /// Returns a mutable reference to the `PropertyArena`.
@@ -472,7 +520,9 @@ impl RenderRoot {
     /// Returns the widget ID of each layer, in stack order.
     ///
     /// Index 0 is the base layer; subsequent entries are overlay layers.
-    pub(crate) fn layer_root_ids(&self) -> Vec<WidgetId> {
+    /// Public so hosts (e.g. the inspector controller) can discover the id
+    /// of a layer they added (adding returns no id).
+    pub fn layer_root_ids(&self) -> Vec<WidgetId> {
         let node_ref = self
             .widget_arena
             .nodes

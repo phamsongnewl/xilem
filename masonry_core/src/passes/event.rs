@@ -6,9 +6,9 @@ use tracing::{info_span, trace};
 use crate::app::{RenderRoot, RenderRootSignal};
 use crate::core::keyboard::{Key, KeyState, NamedKey};
 use crate::core::{
-    AccessEvent, EventCtx, Handled, Ime, PointerButtonEvent, PointerEvent, PointerGestureEvent,
-    PointerInfo, PointerScrollEvent, PointerType, PointerUpdate, PropertiesMut, TextEvent, Widget,
-    WidgetId,
+    AccessEvent, CursorIcon, EventCtx, Handled, Ime, InspectorEvent, PointerButtonEvent,
+    PointerEvent, PointerGestureEvent, PointerInfo, PointerScrollEvent, PointerType, PointerUpdate,
+    PropertiesMut, TextEvent, Widget, WidgetId,
 };
 use crate::dpi::{LogicalPosition, PhysicalPosition};
 use crate::passes::update::find_next_focusable;
@@ -161,6 +161,23 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
     }
     root.global_state.needs_pointer_pass = true;
 
+    // Hit-test once up front: used by the listener, the picker, and normal dispatch.
+    let target_widget_id = get_pointer_target(root, event_pos);
+
+    // The inspector listener observes the event before any picker short-circuit.
+    // The listener is temporarily taken out of the state so the hit path can be
+    // computed while it is held (borrow checker); it is always put back.
+    let mut listener = root.global_state.inspector_event_listener.take();
+    if let Some(listener) = listener.as_mut() {
+        let path = root.widget_path(target_widget_id);
+        listener(InspectorEvent::Pointer {
+            event,
+            target: target_widget_id,
+            path,
+        });
+    }
+    root.global_state.inspector_event_listener = listener;
+
     if root.global_state.inspector_state.is_picking_widget
         && matches!(event, PointerEvent::Move(..))
     {
@@ -172,8 +189,15 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
     if root.global_state.inspector_state.is_picking_widget
         && matches!(event, PointerEvent::Down { .. })
     {
-        let target_widget_id = get_pointer_target(root, event_pos);
         if let Some(target_widget_id) = target_widget_id {
+            // The listener observes the pick right before the selection signal.
+            let mut listener = root.global_state.inspector_event_listener.take();
+            if let Some(listener) = listener.as_mut() {
+                listener(InspectorEvent::Pick {
+                    widget: target_widget_id,
+                });
+            }
+            root.global_state.inspector_event_listener = listener;
             root.global_state
                 .emit_signal(RenderRootSignal::WidgetSelectedInInspector(
                     target_widget_id,
@@ -181,6 +205,10 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
         }
         root.global_state.inspector_state.is_picking_widget = false;
         root.global_state.inspector_state.hovered_widget = None;
+        // Picking is one-shot: the pick restores the default cursor (the
+        // picker mode ends with this click).
+        root.global_state.cursor_icon = CursorIcon::Default;
+        root.emit_signal(RenderRootSignal::SetCursor(CursorIcon::Default));
         root.root_state_mut().needs_paint = true;
         return Handled::Yes;
     }
@@ -216,8 +244,6 @@ pub(crate) fn run_on_pointer_event_pass(root: &mut RenderRoot, event: &PointerEv
             layer.capture_pointer_event(&mut ctx, &mut props, event);
         }
     }
-
-    let target_widget_id = get_pointer_target(root, event_pos);
 
     if matches!(event, PointerEvent::Down { .. })
         && let Some(target_widget_id) = target_widget_id
@@ -292,17 +318,46 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
         root.global_state.window_focused = *focused;
     }
 
-    let target = root.global_state.focused_widget.filter(|&id| root.has_widget(id)).or_else(|| {
-        if let Some(focus_fallback) = root.global_state.focus_fallback
-            && root.is_still_interactive(focus_fallback)
-        {
-            Some(focus_fallback)
-        } else {
-            None
-        }
-    });
+    let target = root
+        .global_state
+        .focused_widget
+        .filter(|&id| root.has_widget(id))
+        .or_else(|| {
+            if let Some(focus_fallback) = root.global_state.focus_fallback
+                && root.is_still_interactive(focus_fallback)
+            {
+                Some(focus_fallback)
+            } else {
+                None
+            }
+        });
 
     let skip_if_disabled = !matches!(event, TextEvent::Ime(Ime::Disabled));
+
+    // Debug toggles take priority over the widget pass: a focused editor (or
+    // any widget that marks every key as handled) would otherwise swallow F11,
+    // so the picker could never toggle while typing. Only a plain F11 press
+    // (no modifiers) is intercepted; the key is not forwarded to widgets.
+    // The cursor switches to a crosshair while picking, so the toggle has
+    // visible feedback.
+    if let TextEvent::Keyboard(key) = event
+        && key.key == Key::Named(NamedKey::F11)
+        && key.state == KeyState::Down
+        && key.modifiers.is_empty()
+    {
+        root.global_state.inspector_state.is_picking_widget =
+            !root.global_state.inspector_state.is_picking_widget;
+        root.global_state.inspector_state.hovered_widget = None;
+        root.global_state.cursor_icon = if root.global_state.inspector_state.is_picking_widget {
+            CursorIcon::Crosshair
+        } else {
+            CursorIcon::Default
+        };
+        root.emit_signal(RenderRootSignal::SetCursor(root.global_state.cursor_icon));
+        root.root_state_mut().needs_paint = true;
+        return Handled::Yes;
+    }
+
     let mut handled = run_event_pass(
         root,
         target,
@@ -327,17 +382,6 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
             handled = Handled::Yes;
         }
 
-        if key.key == Key::Named(NamedKey::F11)
-            && key.state == KeyState::Down
-            && handled == Handled::No
-        {
-            root.global_state.inspector_state.is_picking_widget =
-                !root.global_state.inspector_state.is_picking_widget;
-            root.global_state.inspector_state.hovered_widget = None;
-            root.root_state_mut().needs_paint = true;
-            handled = Handled::Yes;
-        }
-
         if key.key == Key::Named(NamedKey::F12)
             && key.state == KeyState::Down
             && handled == Handled::No
@@ -346,6 +390,12 @@ pub(crate) fn run_on_text_event_pass(root: &mut RenderRoot, event: &TextEvent) -
             root.root_state_mut().needs_paint = true;
             handled = Handled::Yes;
         }
+    }
+
+    // NEW: inspector listener.
+    if let Some(listener) = root.global_state.inspector_event_listener.as_mut() {
+        let focused = root.global_state.focused_widget;
+        listener(InspectorEvent::Text { event, focused });
     }
 
     trace!(

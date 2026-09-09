@@ -9,9 +9,9 @@ use ui_events::pointer::PointerType;
 
 use crate::app::{RenderRoot, RenderRootSignal, RenderRootState};
 use crate::core::{
-    ClassSetDiff, CursorIcon, DefaultProperties, Ime, PointerEvent, PointerInfo, PropertiesMut,
-    PropertiesRef, PropertyArena, PropertyCache, QueryCtx, RegisterCtx, TextEvent, Update,
-    UpdateCtx, Widget, WidgetArenaNode, WidgetId, WidgetState,
+    ClassSetDiff, CursorIcon, DefaultProperties, Ime, InspectorEvent, PointerEvent, PointerInfo,
+    PropertiesMut, PropertiesRef, PropertyArena, PropertyCache, QueryCtx, RegisterCtx, TextEvent,
+    Update, UpdateCtx, Widget, WidgetArenaNode, WidgetId, WidgetState,
 };
 use crate::passes::event::{run_on_pointer_event_pass, run_on_text_event_pass};
 use crate::passes::{enter_span, enter_span_if, merge_state_up, recurse_on_children};
@@ -806,6 +806,15 @@ pub(crate) fn run_update_focus_pass(root: &mut RenderRoot) {
 
     root.global_state.focused_widget = next_focused;
     root.global_state.focused_path = next_focused_path;
+
+    // NEW: inspector listener — only when the focused widget actually changed.
+    if root.global_state.focused_widget != prev_focused
+        && let Some(listener) = root.global_state.inspector_event_listener.as_mut()
+    {
+        listener(InspectorEvent::Focus {
+            widget: root.global_state.focused_widget,
+        });
+    }
 }
 
 // ----------------
@@ -1074,7 +1083,11 @@ pub(crate) fn run_update_pointer_pass(root: &mut RenderRoot) {
         .pointer_capture_target
         .or(next_hovered_widget);
 
-    let new_icon = if let (Some(icon_source), Some(pos)) = (icon_source, pointer_pos) {
+    // Widget-picker mode overrides the hover cursor with a crosshair so the
+    // mode has visible feedback (e.g. after an F11 toggle while hovering).
+    let new_icon = if root.global_state.inspector_state.is_picking_widget {
+        CursorIcon::Crosshair
+    } else if let (Some(icon_source), Some(pos)) = (icon_source, pointer_pos) {
         let root_node = root.widget_arena.get_node(icon_source);
         let children = root_node.children;
         let widget = &*root_node.item.widget;

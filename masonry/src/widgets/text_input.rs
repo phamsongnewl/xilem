@@ -374,7 +374,11 @@ impl Widget for TextInput {
     }
 
     fn get_debug_text(&self) -> Option<String> {
-        self.clip.then(|| "(clip)".into())
+        if !self.placeholder_text.is_empty() {
+            Some(format!("<{}>", self.placeholder_text))
+        } else {
+            self.clip.then(|| "(clip)".into())
+        }
     }
 }
 

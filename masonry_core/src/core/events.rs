@@ -6,6 +6,7 @@
 use kurbo::Rect;
 use ui_events::keyboard::{Code, Key, KeyState, KeyboardEvent};
 
+use crate::core::{ErasedAction, PointerEvent, WidgetId};
 use crate::dpi::PhysicalSize;
 use crate::util::Duration;
 
@@ -59,6 +60,51 @@ pub enum TextEvent {
         text: String,
         /// Optional custom format bytes, e.g. `application/x-suess-rich+json`.
         custom: Option<Vec<u8>>,
+    },
+}
+
+/// Events observed by the widget inspector.
+///
+/// The listener is set via [`RenderRoot::set_inspector_event_listener`](crate::app::RenderRoot::set_inspector_event_listener).
+/// Events are delivered on the main thread during the corresponding pass, *after*
+/// the pass computed its data but *before* any inspector (picker) short-circuit.
+/// The picker additionally emits [`InspectorEvent::Pick`] when a picker click
+/// selects a widget (right before the selection signal fires).
+#[derive(Clone, Debug)]
+pub enum InspectorEvent<'a> {
+    /// A pointer event, with the hit-tested target (None = empty area) and the
+    /// root-to-leaf hit path.
+    Pointer {
+        /// The observed pointer event.
+        event: &'a PointerEvent,
+        /// The hit-tested target widget; `None` when the pointer is over empty area.
+        target: Option<WidgetId>,
+        /// Root-to-leaf path of the target widget.
+        path: Vec<WidgetId>,
+    },
+    /// A text (keyboard/IME) event, with the currently focused widget (None when unfocused).
+    Text {
+        /// The observed text event.
+        event: &'a TextEvent,
+        /// The currently focused widget, if any.
+        focused: Option<WidgetId>,
+    },
+    /// An action emitted by a widget.
+    Action {
+        /// The emitted action.
+        action: &'a ErasedAction,
+        /// The widget that emitted the action.
+        source: WidgetId,
+    },
+    /// The focused widget changed.
+    Focus {
+        /// The newly focused widget; `None` when focus was lost.
+        widget: Option<WidgetId>,
+    },
+    /// A widget was selected via the inspector picker (the picker consumed the click).
+    Pick {
+        /// The widget that was picked.
+        widget: WidgetId,
     },
 }
 
