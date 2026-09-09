@@ -47,6 +47,10 @@ use crate::{TextAlign, theme};
 pub struct TextArea<const USER_EDITABLE: bool> {
     /// The underlying `PlainEditor`, which provides a high-level interface for us to dispatch into.
     editor: PlainEditor<BrushIndex>,
+    /// Text snapshots from before user edits, oldest first.
+    undo_stack: Vec<String>,
+    /// Text snapshots that can be reapplied after an undo, oldest first.
+    redo_stack: Vec<String>,
     /// Placeholder text exposed to accessibility APIs by an editable text area.
     placeholder: ArcStr,
     /// The generation of `editor` which we have rendered.
@@ -119,6 +123,8 @@ impl<const EDITABLE: bool> TextArea<EDITABLE> {
         editor.set_text(text);
         Self {
             editor,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             placeholder: "".into(),
             rendered_generation: Generation::default(),
             word_wrap: true,
@@ -336,6 +342,8 @@ impl<const EDITABLE: bool> TextArea<EDITABLE> {
             let (fctx, lctx) = this.ctx.text_contexts();
             this.widget.editor.driver(fctx, lctx).clear_compose();
         }
+        this.widget.undo_stack.clear();
+        this.widget.redo_stack.clear();
         this.widget.editor.set_text(new_text);
 
         let (fctx, lctx) = this.ctx.text_contexts();
@@ -428,6 +436,38 @@ pub enum TextAction {
     /// The Escape key was pressed, signalling a cancel action.
     Cancelled,
     // TODO: TextCursor changed, ImeChanged
+}
+
+const HISTORY_LIMIT: usize = 100;
+
+fn push_snapshot(stack: &mut Vec<String>, snapshot: String) {
+    if stack.len() >= HISTORY_LIMIT {
+        stack.remove(0);
+    }
+    stack.push(snapshot);
+}
+
+impl<const EDITABLE: bool> TextArea<EDITABLE> {
+    fn record_edit(&mut self, previous_text: String, current_text: &str) {
+        if previous_text == current_text {
+            return;
+        }
+
+        push_snapshot(&mut self.undo_stack, previous_text);
+        self.redo_stack.clear();
+    }
+
+    fn restore_text(
+        &mut self,
+        text: &str,
+        font_context: &mut crate::parley::FontContext,
+        layout_context: &mut crate::parley::LayoutContext<BrushIndex>,
+    ) {
+        self.editor.set_text(text);
+        self.editor
+            .driver(font_context, layout_context)
+            .move_to_text_end();
+    }
 }
 
 // --- MARK: IMPL WIDGET
@@ -566,9 +606,50 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                     },
                 );
                 let (fctx, lctx) = ctx.text_contexts();
+                let previous_text = self.text().to_string();
+                let mut restored_text = None;
                 // Whether the text was changed.
                 let mut edited = false;
                 match &key_event.key {
+                    Key::Character(z)
+                        if EDITABLE
+                            && action_mod
+                            && shift
+                            && z.as_str().eq_ignore_ascii_case("z") =>
+                    {
+                        if let Some(text) = self.redo_stack.pop() {
+                            let current_text = self.text().to_string();
+                            push_snapshot(&mut self.undo_stack, current_text);
+                            self.restore_text(&text, fctx, lctx);
+                            restored_text = Some(text);
+                        }
+                    }
+                    Key::Character(z)
+                        if EDITABLE
+                            && action_mod
+                            && !shift
+                            && z.as_str().eq_ignore_ascii_case("z") =>
+                    {
+                        if let Some(text) = self.undo_stack.pop() {
+                            let current_text = self.text().to_string();
+                            push_snapshot(&mut self.redo_stack, current_text);
+                            self.restore_text(&text, fctx, lctx);
+                            restored_text = Some(text);
+                        }
+                    }
+                    Key::Character(y)
+                        if EDITABLE
+                            && action_mod
+                            && !shift
+                            && y.as_str().eq_ignore_ascii_case("y") =>
+                    {
+                        if let Some(text) = self.redo_stack.pop() {
+                            let current_text = self.text().to_string();
+                            push_snapshot(&mut self.undo_stack, current_text);
+                            self.restore_text(&text, fctx, lctx);
+                            restored_text = Some(text);
+                        }
+                    }
                     // Cut
                     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                     Key::Character(x)
@@ -693,6 +774,10 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
 
                         edited = true;
                     }
+                    // Paste is delivered separately as a clipboard event by the platform.
+                    Key::Character(v) if action_mod && v.as_str().eq_ignore_ascii_case("v") => {}
+                    // Consume modified character keys before they reach generic insertion.
+                    Key::Character(_) if EDITABLE && action_mod => {}
                     Key::Character(sp) if EDITABLE && sp.as_str() == " " => {
                         self.editor
                             .driver(fctx, lctx)
@@ -748,10 +833,13 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                 ctx.set_handled();
                 let new_generation = self.editor.generation();
                 if new_generation != self.rendered_generation {
-                    if edited {
-                        ctx.submit_action::<Self::Action>(TextAction::Changed(
-                            self.text().into_iter().collect(),
-                        ));
+                    if let Some(restored_text) = restored_text {
+                        ctx.submit_action::<Self::Action>(TextAction::Changed(restored_text));
+                        ctx.request_layout();
+                    } else if edited {
+                        let text = self.text().into_iter().collect::<String>();
+                        self.record_edit(previous_text, &text);
+                        ctx.submit_action::<Self::Action>(TextAction::Changed(text));
                         ctx.request_layout();
                     } else {
                         ctx.request_render();
@@ -769,6 +857,7 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
             TextEvent::Ime(e) => {
                 // TODO: Handle the cursor movement things from https://github.com/rust-windowing/winit/pull/3824
                 let (fctx, lctx) = ctx.text_contexts();
+                let previous_text = self.text().to_string();
 
                 // Whether the returned text has changed.
                 // We don't send a TextChanged when the preedit changes
@@ -796,7 +885,10 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
 
                 ctx.set_handled();
                 if edited {
-                    let text = self.text().into_iter().collect();
+                    let text = self.text().into_iter().collect::<String>();
+                    if matches!(e, Ime::Commit(_)) {
+                        self.record_edit(previous_text, &text);
+                    }
                     ctx.submit_action::<Self::Action>(TextAction::Changed(text));
                 }
 
@@ -810,6 +902,7 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
             TextEvent::ClipboardPasteMulti { text, custom: _ }
             | TextEvent::ClipboardPaste(text) => {
                 if EDITABLE {
+                    let previous_text = self.text().to_string();
                     let (fctx, lctx) = ctx.text_contexts();
                     self.editor
                         .driver(fctx, lctx)
@@ -818,9 +911,9 @@ impl<const EDITABLE: bool> Widget for TextArea<EDITABLE> {
                     // TODO - Factor out with other branches
                     let new_generation = self.editor.generation();
                     if new_generation != self.rendered_generation {
-                        ctx.submit_action::<Self::Action>(TextAction::Changed(
-                            self.text().into_iter().collect(),
-                        ));
+                        let current_text = self.text().into_iter().collect::<String>();
+                        self.record_edit(previous_text, &current_text);
+                        ctx.submit_action::<Self::Action>(TextAction::Changed(current_text));
                         ctx.request_layout();
                         self.rendered_generation = new_generation;
                     }
@@ -1337,5 +1430,420 @@ mod tests {
         assert_eq!(action, TextAction::Cancelled);
         assert!(harness.pop_action_erased().is_none());
         assert_eq!(text, "hello world");
+    }
+
+    mod undo {
+        //! Undo, redo, and guarded shortcut behavior tests.
+
+        use super::*;
+        use crate::core::keyboard::{Key, KeyState};
+        use crate::core::{Ime, KeyboardEvent, Modifiers, NewWidget, TextEvent, Widget, WidgetId};
+        use crate::testing::TestHarness;
+        use crate::theme::test_property_set;
+        use crate::widgets::TextInput;
+
+        fn action_modifiers(shift: bool) -> Modifiers {
+            let mut modifiers = if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            };
+            if shift {
+                modifiers.insert(Modifiers::SHIFT);
+            }
+            modifiers
+        }
+
+        fn press_key<W: Widget>(harness: &mut TestHarness<W>, key: Key, modifiers: Modifiers) {
+            let _ = harness.process_text_event(TextEvent::Keyboard(KeyboardEvent {
+                state: KeyState::Down,
+                key,
+                modifiers,
+                ..Default::default()
+            }));
+        }
+
+        fn assert_changed<W: Widget>(
+            harness: &mut TestHarness<W>,
+            widget_id: WidgetId,
+            text: &str,
+        ) {
+            assert_eq!(
+                harness.pop_action::<TextAction>(),
+                Some((TextAction::Changed(text.to_string()), widget_id))
+            );
+            assert!(harness.pop_action_erased().is_none());
+        }
+
+        fn assert_no_actions<W: Widget>(harness: &mut TestHarness<W>) {
+            assert!(harness.pop_action_erased().is_none());
+        }
+
+        fn text_area_harness(
+            text: &str,
+            insert_newline: InsertNewline,
+        ) -> (TestHarness<TextArea<true>>, WidgetId) {
+            let area =
+                NewWidget::new(TextArea::new_editable(text).with_insert_newline(insert_newline));
+            let mut harness = TestHarness::create(test_property_set(), area);
+            let text_id = harness.root_id();
+
+            // Resetting through the public API gives the test a caret at the end while
+            // also exercising the non-user reset history clearing behavior.
+            harness.edit_root_widget(|mut area| TextArea::reset_text(&mut area, text));
+            harness.focus_on(Some(text_id));
+            (harness, text_id)
+        }
+
+        fn text_input_harness(text: &str) -> (TestHarness<TextInput>, WidgetId) {
+            let input = NewWidget::new(TextInput::new(text));
+            let mut harness = TestHarness::create(test_property_set(), input);
+            let text_id = harness.edit_root_widget(|mut input| {
+                let mut area = TextInput::text_mut(&mut input);
+                let text_id = area.ctx.widget_id();
+                TextArea::reset_text(&mut area, text);
+                text_id
+            });
+            harness.focus_on(Some(text_id));
+            (harness, text_id)
+        }
+
+        fn assert_text_area_state<const EDITABLE: bool>(
+            harness: &TestHarness<TextArea<EDITABLE>>,
+            expected_text: &str,
+            expected_caret: usize,
+        ) {
+            let area = harness.root_widget();
+            assert_eq!(area.text().to_string(), expected_text);
+            assert_eq!(area.editor.raw_selection().focus().index(), expected_caret);
+        }
+
+        fn assert_text_input_state(
+            harness: &TestHarness<TextInput>,
+            text_id: WidgetId,
+            expected_text: &str,
+            expected_caret: usize,
+        ) {
+            let area = harness
+                .get_widget_with_id(text_id)
+                .downcast::<TextArea<true>>()
+                .unwrap();
+            assert_eq!(area.text().to_string(), expected_text);
+            assert_eq!(area.editor.raw_selection().focus().index(), expected_caret);
+        }
+
+        fn select_range(harness: &mut TestHarness<TextArea<true>>, start: usize, end: usize) {
+            harness.edit_root_widget(|mut area| TextArea::select_byte_range(&mut area, start, end));
+        }
+
+        #[test]
+        fn empty_history_undo_and_unhandled_modified_keys_are_noops() {
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+
+            for (key, modifiers) in [
+                (Key::Character("z".into()), action_modifiers(false)),
+                (Key::Character("y".into()), action_modifiers(false)),
+                (Key::Character("z".into()), action_modifiers(true)),
+                (Key::Character("b".into()), action_modifiers(false)),
+                (Key::Character("1".into()), action_modifiers(false)),
+                (Key::Character("!".into()), action_modifiers(false)),
+                (Key::Character(" ".into()), action_modifiers(false)),
+                (Key::Character("f".into()), action_modifiers(false)),
+            ] {
+                press_key(&mut harness, key, modifiers);
+                assert_text_area_state(&harness, "a", 1);
+                assert_no_actions(&mut harness);
+            }
+
+            assert_eq!(harness.root_id(), text_id);
+        }
+
+        #[test]
+        fn redo_via_ctrl_y_restores_text_and_caret() {
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+
+            press_key(&mut harness, Key::Character("b".into()), Modifiers::empty());
+            assert_text_area_state(&harness, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_changed(&mut harness, text_id, "a");
+
+            press_key(
+                &mut harness,
+                Key::Character("y".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+        }
+
+        #[test]
+        fn redo_via_shifted_z_restores_text_and_caret() {
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+
+            press_key(&mut harness, Key::Character("b".into()), Modifiers::empty());
+            assert_changed(&mut harness, text_id, "ab");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_changed(&mut harness, text_id, "a");
+
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(true),
+            );
+            assert_text_area_state(&harness, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+        }
+
+        #[test]
+        fn new_edit_clears_redo_history() {
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+
+            press_key(&mut harness, Key::Character("b".into()), Modifiers::empty());
+            assert_changed(&mut harness, text_id, "ab");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_changed(&mut harness, text_id, "a");
+
+            press_key(&mut harness, Key::Character("c".into()), Modifiers::empty());
+            assert_text_area_state(&harness, "ac", 2);
+            assert_changed(&mut harness, text_id, "ac");
+
+            press_key(
+                &mut harness,
+                Key::Character("y".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "ac", 2);
+            assert_no_actions(&mut harness);
+        }
+
+        #[test]
+        fn deletion_and_newline_are_undoable() {
+            let (mut harness, text_id) = text_area_harness("abc", InsertNewline::Never);
+
+            press_key(
+                &mut harness,
+                Key::Named(NamedKey::Backspace),
+                Modifiers::empty(),
+            );
+            assert_text_area_state(&harness, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "abc", 3);
+            assert_changed(&mut harness, text_id, "abc");
+
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::OnEnter);
+            press_key(
+                &mut harness,
+                Key::Named(NamedKey::Enter),
+                Modifiers::empty(),
+            );
+            assert_text_area_state(&harness, "a\n", 2);
+            assert_changed(&mut harness, text_id, "a\n");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_changed(&mut harness, text_id, "a");
+        }
+
+        #[test]
+        fn paste_and_ime_commit_are_undoable() {
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+
+            harness.process_text_event(TextEvent::ClipboardPaste("bc".into()));
+            assert_text_area_state(&harness, "abc", 3);
+            assert_changed(&mut harness, text_id, "abc");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_changed(&mut harness, text_id, "a");
+
+            harness.process_text_event(TextEvent::Ime(Ime::Commit("bc".into())));
+            assert_text_area_state(&harness, "abc", 3);
+            assert_changed(&mut harness, text_id, "abc");
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_changed(&mut harness, text_id, "a");
+        }
+
+        #[test]
+        fn selection_replacement_undo_and_redo_move_caret_to_text_end() {
+            let (mut harness, text_id) = text_area_harness("abc", InsertNewline::Never);
+            select_range(&mut harness, 1, 2);
+
+            press_key(&mut harness, Key::Character("x".into()), Modifiers::empty());
+            assert_text_area_state(&harness, "axc", 2);
+            assert_changed(&mut harness, text_id, "axc");
+
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "abc", 3);
+            assert_changed(&mut harness, text_id, "abc");
+
+            press_key(
+                &mut harness,
+                Key::Character("y".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "axc", 3);
+            assert_changed(&mut harness, text_id, "axc");
+        }
+
+        #[test]
+        fn history_is_capped_at_one_hundred_snapshots() {
+            let (mut harness, text_id) = text_area_harness("", InsertNewline::Never);
+
+            for length in 1..=101 {
+                press_key(&mut harness, Key::Character("a".into()), Modifiers::empty());
+                let text = "a".repeat(length);
+                assert_text_area_state(&harness, &text, length);
+                assert_changed(&mut harness, text_id, &text);
+            }
+
+            for length in (1..=100).rev() {
+                press_key(
+                    &mut harness,
+                    Key::Character("z".into()),
+                    action_modifiers(false),
+                );
+                let text = "a".repeat(length);
+                assert_text_area_state(&harness, &text, length);
+                assert_changed(&mut harness, text_id, &text);
+            }
+
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_no_actions(&mut harness);
+        }
+
+        #[test]
+        fn assigned_clipboard_and_selection_shortcuts_remain_unchanged() {
+            let (mut harness, text_id) = text_area_harness("abc", InsertNewline::Never);
+            select_range(&mut harness, 1, 2);
+
+            press_key(
+                &mut harness,
+                Key::Character("c".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "abc", 2);
+            assert_eq!(harness.clipboard_contents(), "b");
+            assert_no_actions(&mut harness);
+
+            press_key(
+                &mut harness,
+                Key::Character("a".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "abc", 3);
+            assert_no_actions(&mut harness);
+
+            press_key(
+                &mut harness,
+                Key::Character("v".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "abc", 3);
+            assert_no_actions(&mut harness);
+
+            select_range(&mut harness, 1, 2);
+            press_key(
+                &mut harness,
+                Key::Character("x".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "ac", 1);
+            assert_changed(&mut harness, text_id, "ac");
+        }
+
+        #[test]
+        fn text_input_uses_the_shared_undo_history() {
+            let (mut harness, text_id) = text_input_harness("a");
+
+            press_key(&mut harness, Key::Character("b".into()), Modifiers::empty());
+            assert_text_input_state(&harness, text_id, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_input_state(&harness, text_id, "a", 1);
+            assert_changed(&mut harness, text_id, "a");
+
+            press_key(
+                &mut harness,
+                Key::Character("y".into()),
+                action_modifiers(false),
+            );
+            assert_text_input_state(&harness, text_id, "ab", 2);
+            assert_changed(&mut harness, text_id, "ab");
+        }
+
+        #[test]
+        fn read_only_and_disabled_text_ignores_history_shortcuts() {
+            let area = NewWidget::new(TextArea::new_immutable("a"));
+            let mut harness = TestHarness::create(test_property_set(), area);
+            let text_id = harness.root_id();
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 0);
+            assert_no_actions(&mut harness);
+
+            let (mut harness, text_id) = text_area_harness("a", InsertNewline::Never);
+            harness.edit_root_widget(|mut area| area.ctx.set_disabled(true));
+            press_key(
+                &mut harness,
+                Key::Character("z".into()),
+                action_modifiers(false),
+            );
+            press_key(
+                &mut harness,
+                Key::Character("b".into()),
+                action_modifiers(false),
+            );
+            assert_text_area_state(&harness, "a", 1);
+            assert_no_actions(&mut harness);
+            assert_eq!(harness.root_id(), text_id);
+        }
     }
 }
