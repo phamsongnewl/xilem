@@ -4,7 +4,7 @@
 use tracing::debug;
 
 use crate::app::{RenderRoot, RenderRootSignal};
-use crate::core::{ActionCtx, ErasedAction, Handled, PropertiesMut, WidgetId};
+use crate::core::{ActionCtx, ErasedAction, Handled, InspectorEvent, PropertiesMut, WidgetId};
 use crate::passes::{enter_span, merge_state_up};
 
 /// Propagates the `action` from the `source` all the way up to the root widget.
@@ -79,7 +79,16 @@ pub(crate) fn run_action_pass(root: &mut RenderRoot) {
             );
             continue;
         }
-        if let Handled::No = handle_action(root, &action, source) {
+        let handled = handle_action(root, &action, source);
+        // NEW: inspector listener (fires before the signal so the action can
+        // still be borrowed; both happen after handling).
+        if let Some(listener) = root.global_state.inspector_event_listener.as_mut() {
+            listener(InspectorEvent::Action {
+                action: &action,
+                source,
+            });
+        }
+        if let Handled::No = handled {
             root.global_state
                 .emit_signal(RenderRootSignal::Action(action, source));
         }

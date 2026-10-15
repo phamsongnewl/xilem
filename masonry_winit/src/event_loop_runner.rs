@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 
 use accesskit_winit::Adapter;
 use copypasta::nop_clipboard::NopClipboardContext;
@@ -31,19 +31,27 @@ use winit::event::{DeviceEvent as WinitDeviceEvent, DeviceId, WindowEvent as Win
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window as WindowHandle, WindowAttributes, WindowId as HandleId};
 
+use crate::WindowsMultiClipboard;
 use crate::app::{
     AppDriver, DriverCtx, WgpuContext, WgpuLimits, masonry_resize_direction_to_winit,
     winit_ime_to_masonry,
 };
 use crate::app_driver::WindowId;
 use crate::vello_util::{RenderContext, RenderSurface};
-use crate::WindowsMultiClipboard;
 
+/// A callback to run on the event-loop thread with access to [`MasonryState`].
+///
+/// The `Arc<Mutex<Option<...>>>` wrapper lets the payload cross threads
+/// without requiring `MasonryState` to be `Send`: only the `Arc` is sent;
+/// the main thread takes the closure and runs it.
+///
+/// The closure itself must be `Send`, since it is created on the sending
+/// thread and crosses threads inside the `Arc`.
+type CallbackPayload = Arc<Mutex<Option<Box<dyn FnOnce(&mut MasonryState) + Send>>>>;
 /// The custom event type that we inject into winit's [`EventLoop`](winit::event_loop::EventLoop).
 ///
 /// This represents the types that can be emitted during the event loop, but aren't emitted
 /// by winit.
-#[derive(Debug)]
 pub enum MasonryUserEvent {
     /// An accessibility API emitted an event.
     ///
@@ -53,6 +61,33 @@ pub enum MasonryUserEvent {
     ///
     /// Higher-level GUI frameworks may send these to winit from background threads to wake up the event loop.
     AsyncAction(WindowId, ErasedAction),
+    /// A callback to run on the event-loop thread with access to [`MasonryState`].
+    ///
+    /// The `Arc<Mutex<Option<...>>>` wrapper lets the payload cross threads
+    /// without requiring `MasonryState` to be `Send`: only the `Arc` is sent;
+    /// the main thread takes the closure and runs it.
+    ///
+    /// The closure itself must be `Send`, since it is created on the sending
+    /// thread and crosses threads inside the `Arc`.
+    Callback(CallbackPayload),
+}
+
+impl Debug for MasonryUserEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AccessKit(handle_id, event) => f
+                .debug_tuple("AccessKit")
+                .field(handle_id)
+                .field(event)
+                .finish(),
+            Self::AsyncAction(window_id, action) => f
+                .debug_tuple("AsyncAction")
+                .field(window_id)
+                .field(action)
+                .finish(),
+            Self::Callback(_) => f.write_str("Callback(..)"),
+        }
+    }
 }
 
 impl From<accesskit_winit::Event> for MasonryUserEvent {
@@ -965,6 +1000,15 @@ impl MasonryState {
         event: MasonryUserEvent,
         app_driver: &mut dyn AppDriver,
     ) {
+        if let MasonryUserEvent::Callback(callback) = &event {
+            let callback = std::mem::take(&mut *callback.lock().unwrap());
+            if let Some(callback) = callback {
+                callback(self);
+            }
+            self.handle_signals(event_loop, app_driver);
+            return;
+        }
+
         let window = match &event {
             MasonryUserEvent::AccessKit(handle_id, ..) => {
                 let Some(state) = self.windows.get_mut(handle_id) else {
@@ -980,6 +1024,7 @@ impl MasonryState {
                 };
                 self.windows.get_mut(window_id).unwrap()
             }
+            MasonryUserEvent::Callback(_) => unreachable!("handled above"),
         };
         match event {
             MasonryUserEvent::AccessKit(_, event) => {
@@ -1008,6 +1053,7 @@ impl MasonryState {
                     action,
                 );
             }
+            MasonryUserEvent::Callback(_) => unreachable!("handled above"),
         }
 
         self.handle_signals(event_loop, app_driver);
@@ -1178,6 +1224,12 @@ impl MasonryState {
     /// Suspended apps have no surfaces and receive no events.
     pub fn is_suspended(&self) -> bool {
         self.is_suspended
+    }
+
+    /// Returns a clone of the event-loop proxy, for sending [`MasonryUserEvent`]s
+    /// (e.g. [`Callback`](MasonryUserEvent::Callback)) from other threads.
+    pub fn event_loop_proxy(&self) -> EventLoopProxy {
+        self.event_loop_proxy.clone()
     }
 
     // TODO: Remove this method.
