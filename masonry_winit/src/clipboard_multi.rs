@@ -5,10 +5,8 @@
 //! formats (`HTML Format`, `application/x-suess-rich+json`) and write/read
 //! raw bytes without NUL truncation.
 
-use clipboard_win::raw::{
-    get_vec, register_format, set_html, set_string_with, set_without_clear,
-};
 use clipboard_win::options::NoClear;
+use clipboard_win::raw::{get_vec, register_format, set_html, set_string_with, set_without_clear};
 use masonry_core::core::ClipboardFormat;
 
 const RICH_MIME: &str = "application/x-suess-rich+json";
@@ -21,6 +19,12 @@ pub struct WindowsMultiClipboard {
     rich_fmt: u32,
 }
 
+impl Default for WindowsMultiClipboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WindowsMultiClipboard {
     /// Register the two custom formats. Safe to call once; the format codes
     /// are stable for the process lifetime.
@@ -28,14 +32,12 @@ impl WindowsMultiClipboard {
         let html_fmt = register_format(HTML_FORMAT_NAME)
             .map(|n| n.get())
             .unwrap_or(0);
-        let rich_fmt = register_format(RICH_MIME)
-            .map(|n| n.get())
-            .unwrap_or(0);
+        let rich_fmt = register_format(RICH_MIME).map(|n| n.get()).unwrap_or(0);
         Self { html_fmt, rich_fmt }
     }
 
     /// Write all formats atomically: open clipboard, empty once, then
-    /// set_without_clear per format so they coexist.
+    /// `set_without_clear` per format so they coexist.
     pub fn set(&mut self, formats: &[ClipboardFormat]) -> Result<(), Box<dyn std::error::Error>> {
         let _clip = clipboard_win::Clipboard::new_attempts(10)?;
         clipboard_win::raw::empty()?;
@@ -51,10 +53,8 @@ impl WindowsMultiClipboard {
                         let _ = set_html(self.html_fmt, fragment);
                     }
                 }
-                _ if fmt.mime == RICH_MIME => {
-                    if self.rich_fmt != 0 {
-                        let _ = set_without_clear(self.rich_fmt, &fmt.data);
-                    }
+                _ if fmt.mime == RICH_MIME && self.rich_fmt != 0 => {
+                    let _ = set_without_clear(self.rich_fmt, &fmt.data);
                 }
                 _ => {}
             }
@@ -74,5 +74,3 @@ impl WindowsMultiClipboard {
         Some(out)
     }
 }
-
-

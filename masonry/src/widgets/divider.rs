@@ -463,7 +463,7 @@ fn length_with_whole_dashes(space: f64, dashes: &[f64]) -> (f64, SmallVec<[f64; 
     let mut end_pair = n / 2 - 1;
 
     // Add as many (dash, gap) pairs as possible to form the final partial cycle.
-    for (i, pair) in dashes.chunks_exact(2).enumerate() {
+    for (i, pair) in dashes.as_chunks::<2>().0.iter().enumerate() {
         let (dash, gap) = (pair[0], pair[1]);
         if dash > space_free {
             break;
