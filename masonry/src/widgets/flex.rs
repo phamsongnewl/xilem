@@ -638,41 +638,21 @@ fn new_child(params: impl Into<FlexParams>, child: WidgetPod<dyn Widget>) -> Chi
 
 /// Calculates `(space_before, space_between)` from the `extra` space given the `child_count`.
 fn get_spacing(alignment: MainAxisAlignment, extra: f64, child_count: usize) -> (f64, f64) {
-    let space_before;
-    let space_between;
-    match alignment {
-        _ if child_count == 0 => {
-            space_before = 0.;
-            space_between = 0.;
-        }
-        MainAxisAlignment::Start => {
-            space_before = 0.;
-            space_between = 0.;
-        }
-        MainAxisAlignment::End => {
-            space_before = extra;
-            space_between = 0.;
-        }
-        MainAxisAlignment::Center => {
-            space_before = extra / 2.;
-            space_between = 0.;
-        }
-        MainAxisAlignment::SpaceBetween => {
-            let equal_space = extra / (child_count - 1).max(1) as f64;
-            space_before = 0.;
-            space_between = equal_space;
-        }
+    let (space_before, space_between) = match alignment {
+        _ if child_count == 0 => (0., 0.),
+        MainAxisAlignment::Start => (0., 0.),
+        MainAxisAlignment::End => (extra, 0.),
+        MainAxisAlignment::Center => (extra / 2., 0.),
+        MainAxisAlignment::SpaceBetween => (0., extra / (child_count - 1).max(1) as f64),
         MainAxisAlignment::SpaceEvenly => {
             let equal_space = extra / (child_count + 1) as f64;
-            space_before = equal_space;
-            space_between = equal_space;
+            (equal_space, equal_space)
         }
         MainAxisAlignment::SpaceAround => {
             let equal_space = extra / (2 * child_count) as f64;
-            space_before = equal_space;
-            space_between = equal_space * 2.;
+            (equal_space, equal_space * 2.)
         }
-    }
+    };
     (space_before, space_between)
 }
 

@@ -18,6 +18,8 @@ use crate::core::{
 use crate::window_view::{WindowView, WindowViewState};
 use crate::{AppState, Color, ViewCtx};
 
+mod action_routing;
+
 /// The composition root of Xilem's Masonry backend.
 ///
 /// Owns the root state, the root view (kind of), the window state, the event loop proxy,
@@ -314,18 +316,24 @@ where
             return;
         };
 
-        let Some(widget_path) = window.view_ctx.get_id_path(widget_id) else {
-            tracing::error!(
-                "Got action {action:?} for unknown widget. Did you forget to use `with_action_widget`?"
-            );
-            return;
-        };
+        // Both observations are taken now, not when the action was queued: an
+        // earlier action in the same pass may have rebuilt the tree.
+        let source_is_live = masonry_ctx.render_root(window_id).has_widget(widget_id);
+        let path = window.view_ctx.get_id_path(widget_id).cloned();
 
-        let id_path = widget_path.clone();
-        let message = DynMessage(action);
+        action_routing::deliver_action(
+            widget_id,
+            source_is_live,
+            path,
+            action,
+            |id_path, action| {
+                let message = DynMessage(action);
 
-        let message_result = self.dispatch_message(window_id, masonry_ctx, id_path, message);
-        self.handle_message_result(window_id, masonry_ctx, message_result);
+                let message_result =
+                    self.dispatch_message(window_id, masonry_ctx, id_path, message);
+                self.handle_message_result(window_id, masonry_ctx, message_result);
+            },
+        );
     }
 
     fn on_async_action(
